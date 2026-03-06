@@ -1,0 +1,541 @@
+---
+title: 'AuthService API'
+description: 'Authentication, user registration, and profile management'
+icon: 'lock'
+---
+
+## Overview
+
+The `AuthService` handles user authentication, registration, profile management, and password operations. It uses PBKDF2 with SHA256 for secure password hashing and integrates with JWT token generation.
+
+## Interface
+
+```csharp
+public interface IAuthService
+```
+
+Location: `~/workspace/source/AndanDo/Services/Auth/AuthService.cs`
+
+---
+
+## Authentication
+
+### SignInAsync
+
+Authenticates a user with email and password.
+
+```csharp
+Task<AuthResult> SignInAsync(
+    LoginRequest request,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="request" type="LoginRequest" required>
+  Login credentials
+  
+  <Expandable title="LoginRequest properties">
+    - `Email` (string) - User's email address
+    - `Password` (string) - User's password
+  </Expandable>
+</ParamField>
+
+<ParamField path="cancellationToken" type="CancellationToken" default="default">
+  Optional cancellation token
+</ParamField>
+
+<ResponseField name="authResult" type="AuthResult">
+  Authentication result containing user data and JWT token
+  
+  <Expandable title="AuthResult properties">
+    - `UserId` (int) - User's unique identifier
+    - `Email` (string) - User's email
+    - `Token` (string) - JWT authentication token
+    - `Nombre` (string) - First name
+    - `Apellido` (string?) - Last name (optional)
+    - `Telefono` (string?) - Phone number (optional)
+    - `FotoPerfilUrl` (string?) - Profile photo URL (optional)
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var loginRequest = new LoginRequest(
+    Email: "user@example.com",
+    Password: "SecurePassword123!"
+);
+
+try
+{
+    var result = await authService.SignInAsync(loginRequest);
+    Console.WriteLine($"Welcome, {result.Nombre}!");
+    Console.WriteLine($"Token: {result.Token}");
+}
+catch (UnauthorizedAccessException ex)
+{
+    Console.WriteLine($"Login failed: {ex.Message}");
+}
+```
+</CodeGroup>
+
+<Warning>
+  **Security Checks**: This method validates:
+  - Email exists in the database
+  - Password matches the stored hash
+  - User account is active (`EstaActivo = true`)
+  - User account is not blocked (`EstaBloqueado = false`)
+  
+  Throws `UnauthorizedAccessException` if any check fails.
+</Warning>
+
+<Info>
+  The method automatically updates the user's `UltimoLogin` field to the current UTC time upon successful authentication.
+</Info>
+
+---
+
+## Registration
+
+### RegisterAsync
+
+Registers a new user account.
+
+```csharp
+Task<RegisterResult> RegisterAsync(
+    RegisterRequest request,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="request" type="RegisterRequest" required>
+  Registration data
+  
+  <Expandable title="RegisterRequest properties">
+    - `Email` (string) - User's email (must be unique)
+    - `Password` (string) - Password (will be hashed)
+    - `Nombre` (string) - First name
+    - `Apellido` (string?) - Last name (optional)
+    - `Telefono` (string?) - Phone number (optional)
+    - `Pais` (string?) - Country (optional)
+    - `Ciudad` (string?) - City (optional)
+    - `FotoPerfilUrl` (string?) - Profile photo URL (optional)
+  </Expandable>
+</ParamField>
+
+<ResponseField name="registerResult" type="RegisterResult">
+  Registration result
+  
+  <Expandable title="Properties">
+    - `UserId` (int) - Newly created user ID
+    - `Email` (string) - Registered email
+    - `Message` (string) - Success or error message
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var registerRequest = new RegisterRequest(
+    Email: "newuser@example.com",
+    Password: "SecurePassword123!",
+    Nombre: "John",
+    Apellido: "Doe",
+    Telefono: "+1-555-0123",
+    Pais: "Dominican Republic",
+    Ciudad: "Santo Domingo",
+    FotoPerfilUrl: null
+);
+
+try
+{
+    var result = await authService.RegisterAsync(registerRequest);
+    Console.WriteLine($"User registered with ID: {result.UserId}");
+    Console.WriteLine($"Message: {result.Message}");
+}
+catch (InvalidOperationException ex)
+{
+    Console.WriteLine($"Registration failed: {ex.Message}");
+}
+```
+</CodeGroup>
+
+<Note>
+  The user is automatically assigned to role ID 1 (default user role) after successful registration.
+</Note>
+
+<Warning>
+  **Validation**: The method will throw `InvalidOperationException` if:
+  - Email is already registered (result code 1)
+  - Specified role doesn't exist or is inactive (result code 2)
+  - Any other database constraint is violated
+</Warning>
+
+---
+
+## Password Management
+
+### HashPassword
+
+Hashes a password using PBKDF2 with SHA256.
+
+```csharp
+string HashPassword(string password)
+```
+
+<ParamField path="password" type="string" required>
+  Plain text password to hash
+</ParamField>
+
+<ResponseField name="hash" type="string">
+  Base64-encoded hash in format: `{salt}:{hash}`
+</ResponseField>
+
+<Info>
+  **Security Parameters**:
+  - Algorithm: PBKDF2 with SHA256
+  - Iterations: 100,000
+  - Salt size: 16 bytes
+  - Key size: 32 bytes
+</Info>
+
+---
+
+### VerifyPassword
+
+Verifies a password against a stored hash.
+
+```csharp
+bool VerifyPassword(string password, string passwordHash)
+```
+
+<ParamField path="password" type="string" required>
+  Plain text password to verify
+</ParamField>
+
+<ParamField path="passwordHash" type="string" required>
+  Stored password hash
+</ParamField>
+
+<ResponseField name="isValid" type="bool">
+  Returns `true` if password matches, `false` otherwise
+</ResponseField>
+
+<Note>
+  Uses constant-time comparison to prevent timing attacks.
+</Note>
+
+---
+
+### ChangePasswordAsync
+
+Changes a user's password after verifying the current password.
+
+```csharp
+Task ChangePasswordAsync(
+    ChangePasswordRequest request,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="request" type="ChangePasswordRequest" required>
+  Password change data
+  
+  <Expandable title="ChangePasswordRequest properties">
+    - `UsuarioId` (int) - User ID
+    - `PasswordActual` (string) - Current password
+    - `PasswordNueva` (string) - New password
+  </Expandable>
+</ParamField>
+
+<CodeGroup>
+```csharp Example
+var changeRequest = new ChangePasswordRequest(
+    UsuarioId: 123,
+    PasswordActual: "OldPassword123",
+    PasswordNueva: "NewSecurePassword456!"
+);
+
+try
+{
+    await authService.ChangePasswordAsync(changeRequest);
+    Console.WriteLine("Password changed successfully");
+}
+catch (InvalidOperationException ex)
+{
+    Console.WriteLine($"Failed: {ex.Message}");
+}
+```
+</CodeGroup>
+
+<Warning>
+  **Validation**: The method validates:
+  - User exists
+  - User account is active
+  - User account is not blocked
+  - Current password is correct
+  
+  Throws `InvalidOperationException` if any check fails.
+</Warning>
+
+---
+
+## Profile Management
+
+### GetUserProfileAsync
+
+Retrieves complete user profile information.
+
+```csharp
+Task<UserProfileDto?> GetUserProfileAsync(
+    int userId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID to retrieve
+</ParamField>
+
+<ResponseField name="profile" type="UserProfileDto?">
+  User profile data or null if not found
+  
+  <Expandable title="UserProfileDto properties">
+    - `UsuarioId` (int) - User ID
+    - `Email` (string) - Email address
+    - `Nombre` (string?) - First name
+    - `Apellido` (string?) - Last name
+    - `Telefono` (string?) - Phone number
+    - `Pais` (string?) - Country
+    - `Ciudad` (string?) - City
+    - `FotoPerfilUrl` (string?) - Profile photo URL
+    - `EstaActivo` (bool) - Active status
+    - `EstaBloqueado` (bool) - Blocked status
+    - `FechaCreacion` (DateTime?) - Account creation date
+    - `FechaActualizacion` (DateTime?) - Last update date
+    - `UltimoLogin` (DateTime?) - Last login timestamp
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var profile = await authService.GetUserProfileAsync(userId: 123);
+
+if (profile != null)
+{
+    Console.WriteLine($"Name: {profile.Nombre} {profile.Apellido}");
+    Console.WriteLine($"Email: {profile.Email}");
+    Console.WriteLine($"Country: {profile.Pais}");
+    Console.WriteLine($"Last login: {profile.UltimoLogin}");
+}
+```
+</CodeGroup>
+
+---
+
+### UpdateUserProfileAsync
+
+Updates user profile information.
+
+```csharp
+Task UpdateUserProfileAsync(
+    UpdateUserProfileRequest request,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="request" type="UpdateUserProfileRequest" required>
+  Profile update data
+  
+  <Expandable title="UpdateUserProfileRequest properties">
+    - `UsuarioId` (int) - User ID
+    - `Nombre` (string?) - First name
+    - `Apellido` (string?) - Last name
+    - `Telefono` (string?) - Phone number
+    - `Pais` (string?) - Country
+    - `Ciudad` (string?) - City
+    - `FotoPerfilUrl` (string?) - Profile photo URL
+  </Expandable>
+</ParamField>
+
+<CodeGroup>
+```csharp Example
+var updateRequest = new UpdateUserProfileRequest(
+    UsuarioId: 123,
+    Nombre: "John",
+    Apellido: "Smith",
+    Telefono: "+1-555-9999",
+    Pais: "United States",
+    Ciudad: "New York",
+    FotoPerfilUrl: "https://example.com/photos/new-profile.jpg"
+);
+
+await authService.UpdateUserProfileAsync(updateRequest);
+```
+</CodeGroup>
+
+<Note>
+  The `FechaActualizacion` field is automatically set to the current UTC time.
+</Note>
+
+<Warning>
+  Throws `InvalidOperationException` if no rows are affected (user not found or database error).
+</Warning>
+
+---
+
+## Achievements
+
+### GetHostAchievementsAsync
+
+Retrieves host achievements for a user.
+
+```csharp
+Task<IReadOnlyList<HostAchievementDto>> GetHostAchievementsAsync(
+    int userId,
+    int take = 3,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID
+</ParamField>
+
+<ParamField path="take" type="int" default="3">
+  Maximum number of achievements to return
+</ParamField>
+
+<ResponseField name="achievements" type="IReadOnlyList<HostAchievementDto>">
+  List of achievements, ordered by unlock date (most recent first)
+  
+  <Expandable title="HostAchievementDto properties">
+    - `AchievementId` (int) - Achievement ID
+    - `Codigo` (string) - Achievement code
+    - `Titulo` (string) - Achievement title
+    - `Descripcion` (string?) - Description
+    - `BadgeUrl` (string?) - Badge image URL
+    - `DesbloqueadoEn` (DateTime?) - Unlock timestamp (null if not unlocked)
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var achievements = await authService.GetHostAchievementsAsync(
+    userId: 123,
+    take: 5
+);
+
+foreach (var achievement in achievements)
+{
+    Console.WriteLine($"{achievement.Titulo} - {achievement.Descripcion}");
+    if (achievement.DesbloqueadoEn.HasValue)
+    {
+        Console.WriteLine($"Unlocked: {achievement.DesbloqueadoEn.Value:g}");
+    }
+}
+```
+</CodeGroup>
+
+---
+
+## Role Management
+
+### IsUserInRoleAsync
+
+Checks if a user has a specific role.
+
+```csharp
+Task<bool> IsUserInRoleAsync(
+    int userId,
+    int roleId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID to check
+</ParamField>
+
+<ParamField path="roleId" type="int" required>
+  Role ID to check
+</ParamField>
+
+<ResponseField name="hasRole" type="bool">
+  Returns `true` if user has the role, `false` otherwise
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+// Check if user is an admin (role ID 2)
+bool isAdmin = await authService.IsUserInRoleAsync(
+    userId: 123,
+    roleId: 2
+);
+
+if (isAdmin)
+{
+    Console.WriteLine("User has admin privileges");
+}
+```
+</CodeGroup>
+
+<Info>
+  Returns `false` if `userId` is less than or equal to 0 (invalid user ID).
+</Info>
+
+---
+
+## Security Best Practices
+
+<Warning>
+  **Password Requirements**: While the service doesn't enforce password complexity, it's recommended to validate passwords before calling `RegisterAsync` or `ChangePasswordAsync`:
+  - Minimum 8 characters
+  - Mix of uppercase and lowercase
+  - Include numbers and special characters
+</Warning>
+
+<Note>
+  **Token Handling**: The JWT token returned by `SignInAsync` should be:
+  - Stored securely on the client side
+  - Sent in the Authorization header for subsequent requests
+  - Never logged or exposed in URLs
+</Note>
+
+<Info>
+  **Account Status**: Always check `EstaActivo` and `EstaBloqueado` fields before allowing operations. Inactive or blocked users should not be able to perform actions even if they have a valid token.
+</Info>
+
+---
+
+## Common Patterns
+
+### User Registration Flow
+
+```csharp
+// 1. Register user
+var registerRequest = new RegisterRequest(...);
+var result = await authService.RegisterAsync(registerRequest);
+
+// 2. Automatically log them in
+var loginRequest = new LoginRequest(
+    Email: registerRequest.Email,
+    Password: registerRequest.Password
+);
+var authResult = await authService.SignInAsync(loginRequest);
+
+// 3. User is now authenticated with a token
+return authResult.Token;
+```
+
+### Profile Update Flow
+
+```csharp
+// 1. Get current profile
+var profile = await authService.GetUserProfileAsync(userId);
+
+// 2. Modify fields
+var updateRequest = new UpdateUserProfileRequest(
+    UsuarioId: userId,
+    Nombre: profile.Nombre,
+    Apellido: profile.Apellido,
+    Telefono: newPhoneNumber, // Updated field
+    Pais: profile.Pais,
+    Ciudad: profile.Ciudad,
+    FotoPerfilUrl: profile.FotoPerfilUrl
+);
+
+// 3. Save changes
+await authService.UpdateUserProfileAsync(updateRequest);
+```

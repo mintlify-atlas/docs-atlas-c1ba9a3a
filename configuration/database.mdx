@@ -1,0 +1,293 @@
+---
+title: 'Database Configuration'
+description: 'SQL Server database setup and connection string configuration'
+icon: 'database'
+---
+
+## Overview
+
+AndanDo uses SQL Server as its primary database. The connection string is configured in `appsettings.json` under the `ConnectionStrings` section and is used throughout the application for data access.
+
+## Connection String Format
+
+The database connection string follows the standard SQL Server format:
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=your-server;Database=AndandoDB;User Id=your-user;Password=your-password;TrustServerCertificate=true;"
+  }
+}
+```
+
+## Connection String Parameters
+
+<Accordion title="Server">
+**Required** - Specifies the SQL Server instance to connect to.
+
+```text
+Server=localhost
+Server=68.178.201.124
+Server=localhost\SQLEXPRESS
+Server=(localdb)\mssqllocaldb
+```
+
+- Use `localhost` or `127.0.0.1` for local development
+- Use IP address or hostname for remote servers
+- Include instance name if not using default instance
+</Accordion>
+
+<Accordion title="Database">
+**Required** - The name of the database to use.
+
+```text
+Database=AndandoDB
+```
+
+The database name for AndanDo is `AndandoDB`.
+</Accordion>
+
+<Accordion title="User Id & Password">
+**Required for SQL Authentication** - Credentials for database access.
+
+```text
+User Id=csuser
+Password=your-secure-password
+```
+
+<Warning>
+Never commit real passwords to source control. Use environment variables or User Secrets.
+</Warning>
+</Accordion>
+
+<Accordion title="TrustServerCertificate">
+**Recommended** - Controls SSL certificate validation.
+
+```text
+TrustServerCertificate=true
+```
+
+- Set to `true` for development or self-signed certificates
+- Set to `false` in production with valid SSL certificates
+- Required for SQL Server 2022+ and Azure SQL connections
+</Accordion>
+
+<Accordion title="Integrated Security (Optional)">
+Use Windows Authentication instead of SQL Authentication.
+
+```text
+Integrated Security=true
+```
+
+When using Windows Authentication, omit `User Id` and `Password`:
+
+```text
+Server=localhost;Database=AndandoDB;Integrated Security=true;TrustServerCertificate=true;
+```
+</Accordion>
+
+<Accordion title="Additional Parameters">
+Other useful connection string parameters:
+
+```text
+# Connection timeout (seconds)
+Connect Timeout=30
+
+# Enable Multiple Active Result Sets
+MultipleActiveResultSets=true
+
+# Encrypt connection
+Encrypt=true
+
+# Connection pooling
+Pooling=true
+Min Pool Size=0
+Max Pool Size=100
+```
+</Accordion>
+
+## Complete Connection String Examples
+
+<CodeGroup>
+```text Local Development (SQL Express)
+Server=localhost\SQLEXPRESS;Database=AndandoDB;Integrated Security=true;TrustServerCertificate=true;
+```
+
+```text Local Development (LocalDB)
+Server=(localdb)\mssqllocaldb;Database=AndandoDB;Integrated Security=true;TrustServerCertificate=true;
+```
+
+```text SQL Authentication
+Server=your-server;Database=AndandoDB;User Id=csuser;Password=your-password;TrustServerCertificate=true;Connect Timeout=30;
+```
+
+```text Azure SQL Database
+Server=your-server.database.windows.net;Database=AndandoDB;User Id=your-user;Password=your-password;Encrypt=true;TrustServerCertificate=false;
+```
+</CodeGroup>
+
+## Using the Connection String in Code
+
+The `DefaultConnection` connection string is used throughout the application. Services retrieve it from `IConfiguration`:
+
+```csharp AuthService.cs
+public class AuthService : IAuthService
+{
+    private readonly string _connectionString;
+
+    public AuthService(IConfiguration configuration)
+    {
+        _connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException("No se encontro DefaultConnection en appsettings.");
+    }
+
+    public async Task<User?> GetUserByEmailAsync(string email)
+    {
+        using var connection = new SqlConnection(_connectionString);
+        // ... database operations
+    }
+}
+```
+
+## Services Using Database Connection
+
+The following services use the `DefaultConnection` connection string:
+
+- **AuthService** (`Services/Auth/AuthService.cs:32`) - User authentication and management
+- **PasswordResetService** (`Services/Auth/PasswordResetService.cs:28`) - Password reset functionality
+- **TourService** (`Services/Tour/TourService.cs:160`) - Tour data management
+- **MailService** (`Services/Mail/MailService.cs:40`) - Internal mail system
+- **ReviewService** (`Services/Utility/ReviewService.cs:20`) - Tour reviews and ratings
+- **PostLikeService** (`Services/Utility/PostLikeService.cs:23`) - Post likes and reactions
+- **FormularioTipoService** (`Services/Utility/FormularioTipoService.cs:20`) - Form type management
+- **AppUpdateService** (`Services/Utility/AppUpdateService.cs:18`) - Application update tracking
+- **SettingsService** (`Services/Core/SettingsService.cs:22`) - Application settings storage
+
+<Note>
+All services validate that the connection string exists and throw an `InvalidOperationException` if it's not configured.
+</Note>
+
+## Environment-Specific Configuration
+
+<Accordion title="Development (User Secrets)">
+For local development, use User Secrets to store the connection string:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost\SQLEXPRESS;Database=AndandoDB;Integrated Security=true;TrustServerCertificate=true;"
+```
+
+Verify the secret was set:
+```bash
+dotnet user-secrets list
+```
+</Accordion>
+
+<Accordion title="Production (Environment Variables)">
+In production, use environment variables:
+
+```bash
+export ConnectionStrings__DefaultConnection="Server=prod-server;Database=AndandoDB;User Id=prod-user;Password=prod-password;TrustServerCertificate=true;"
+```
+
+Or in `appsettings.Production.json`:
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=prod-server;Database=AndandoDB;User Id=prod-user;Password=prod-password;TrustServerCertificate=true;"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="Azure App Service">
+In Azure App Service, configure the connection string in the portal:
+
+1. Go to **Configuration** → **Connection strings**
+2. Add a new connection string:
+   - **Name**: `DefaultConnection`
+   - **Value**: Your SQL connection string
+   - **Type**: `SQLServer`
+3. Click **Save**
+
+Azure automatically injects this as an environment variable.
+</Accordion>
+
+## Database Schema
+
+The `AndandoDB` database contains tables for:
+
+- **Users** - User accounts and authentication
+- **Tours** - Tour listings and details
+- **Bookings** - Tour reservations and payments
+- **Reviews** - Tour reviews and ratings
+- **Messages** - Internal messaging system
+- **Posts & Likes** - Community posts and interactions
+- **Settings** - Application configuration
+
+<Info>
+Database migrations and schema updates are managed manually through SQL scripts.
+</Info>
+
+## Troubleshooting
+
+<Accordion title="Connection string not found">
+**Error**: `InvalidOperationException: Connection string 'DefaultConnection' not found.`
+
+**Solutions**:
+1. Verify `appsettings.json` contains the `ConnectionStrings` section
+2. Check for typos in the connection string name
+3. Ensure environment-specific configuration files are properly named
+4. Verify User Secrets are initialized if using them
+</Accordion>
+
+<Accordion title="Login failed for user">
+**Error**: `SqlException: Login failed for user 'csuser'`
+
+**Solutions**:
+1. Verify username and password are correct
+2. Ensure SQL Server Authentication is enabled
+3. Check that the user has access to the database
+4. Verify the SQL Server instance is running
+</Accordion>
+
+<Accordion title="Certificate validation error">
+**Error**: `The certificate chain was issued by an authority that is not trusted`
+
+**Solution**: Add `TrustServerCertificate=true` to the connection string.
+</Accordion>
+
+<Accordion title="Cannot connect to server">
+**Error**: `SqlException: A network-related or instance-specific error occurred`
+
+**Solutions**:
+1. Verify the server address is correct
+2. Ensure SQL Server is running
+3. Check firewall settings allow TCP/1433
+4. Verify SQL Server Browser service is running (for named instances)
+5. Test connectivity with SQL Server Management Studio
+</Accordion>
+
+## Security Best Practices
+
+<Warning>
+**Database Security Checklist**:
+
+- Never commit connection strings with real passwords to source control
+- Use least privilege principle - grant only necessary permissions
+- Enable SSL encryption for remote connections
+- Rotate database credentials regularly
+- Use firewall rules to restrict database access
+- Enable SQL Server auditing for production environments
+- Use Azure Key Vault or similar for production secrets
+</Warning>
+
+<Tip>
+For development, consider using a local SQL Server Express or LocalDB instance to avoid exposing production credentials.
+</Tip>
+
+## Related Pages
+
+- [appsettings.json Overview](/configuration/appsettings)
+- [Authentication Services](/services/auth)
+- [Tour Management](/services/tours)

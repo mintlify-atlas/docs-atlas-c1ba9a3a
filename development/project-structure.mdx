@@ -1,0 +1,793 @@
+---
+title: Project Structure
+description: Understanding AndanDo's file organization, folder structure, and code conventions
+---
+
+AndanDo follows a **feature-organized** structure with clear separation between presentation, business logic, and data transfer. This guide explains the project layout and naming conventions.
+
+## Root Directory Structure
+
+```
+AndanDo/
+├── Components/              # Blazor UI components
+│   ├── Layout/             # Application layout components
+│   ├── Pages/              # Routable page components
+│   └── Shared/             # Reusable shared components
+├── Dtos/                    # Data Transfer Objects
+├── Properties/              # Project properties and launch settings
+├── Services/                # Business logic and external integrations
+│   ├── Auth/               # Authentication services
+│   ├── Core/               # Core platform services
+│   ├── Email/              # Email sending
+│   ├── JWT/                # JWT token services
+│   ├── Mail/               # Mail queue and dispatcher
+│   ├── Paypal/             # PayPal payment integration
+│   ├── Tour/               # Tour management
+│   └── Utility/            # Utility services (likes, reviews, etc.)
+├── wwwroot/                 # Static files and assets
+│   ├── assets/             # CSS, JS, images
+│   ├── lib/                # Third-party libraries
+│   ├── template/           # HTML templates (invoice, etc.)
+│   └── uploads/            # User-uploaded images
+├── AndanDo.csproj          # Project file with dependencies
+├── Program.cs              # Application entry point and DI setup
+├── appsettings.json        # Configuration
+└── appsettings.Development.json  # Development overrides
+```
+
+<Info>
+The project contains **42 Razor components** organized across Layout, Pages, and Shared directories, plus **15+ service implementation files**.
+</Info>
+
+## Components Directory
+
+The `Components/` directory houses all Blazor UI components:
+
+### Layout Components
+
+<Accordion title="Components/Layout/">
+**Purpose**: Application-wide layout components
+
+**Files**:
+- `MainLayout.razor` - Primary layout with navigation
+- `DashboardLayout.razor` - Dashboard-specific layout
+
+**Usage**: Defined with `@layout` directive in pages
+
+```razor Pages/Home.razor
+@page "/"
+@layout MainLayout
+
+<h1>Welcome to AndanDo</h1>
+```
+</Accordion>
+
+### Page Components
+
+<Accordion title="Components/Pages/" defaultOpen>
+**Purpose**: Routable page components mapped to URLs
+
+**Structure**:
+```
+Pages/
+├── Home.razor                    # Landing page (/) 
+├── Marketplace.razor             # Tour marketplace (/marketplace)
+├── SearchResults.razor           # Search results (/search)
+├── TourDetails.razor             # Tour detail view (/tour/{id})
+├── Tours_Creation_Complete.razor # Tour creation wizard
+├── Invoice.razor                 # Invoice generation/view
+├── HelpCenter.razor              # Help documentation
+├── Terminos.razor                # Terms and conditions
+├── Mantenimiento.razor           # Maintenance page
+├── Error.razor                   # Error page
+├── NotFound.razor                # 404 page
+├── Weather.razor                 # Example weather page
+├── Login_Account.razor           # Login page (/login)
+├── Register_Account.razor        # Registration (/register)
+├── Forgot_Password.razor         # Password reset
+├── Dashboard/                    # Creator dashboard pages
+│   ├── MyBookings.razor         # Booking management
+│   ├── Reports.razor            # Analytics and reports
+│   ├── Settings.razor           # User settings
+│   └── ... (other dashboard pages)
+├── Administrator/                # Admin-only pages
+│   └── ... (admin pages)
+└── FormsServices/                # Tour creation/editing forms
+    └── ... (form pages)
+```
+
+**Routing Example**:
+```razor TourDetails.razor
+@page "/tour/{TourId:int}"
+@inject ITourService TourService
+
+@code {
+    [Parameter]
+    public int TourId { get; set; }
+    
+    private TourDetailDto? Tour { get; set; }
+    
+    protected override async Task OnInitializedAsync()
+    {
+        Tour = await TourService.GetTourByIdAsync(TourId);
+    }
+}
+```
+</Accordion>
+
+### Shared Components
+
+<Accordion title="Components/Shared/">
+**Purpose**: Reusable components used across multiple pages
+
+**Files**:
+- `NavMenu.razor` / `NavMenu.razor.css` - Main navigation menu
+- `DashNavMenu.razor` - Dashboard navigation sidebar
+- `DashTopBar.razor` - Dashboard top bar with user info
+- `Searchbar.razor` - Search bar with autocomplete
+- `Sliders.razor` - Image slider/carousel component
+- `Footer.razor` - Site footer
+- `BannerWithButtom.razor` - Hero banner component
+- `ValidateLogin.razor` - Authentication validation component
+- `ValidateAdmin.razor` - Admin role validation component
+- `MailToastHost.razor` - Toast notification host
+- `ImageHelper.cs` - Helper class for image URLs and placeholders
+
+**Usage Example**:
+```razor Pages/Home.razor
+@page "/"
+
+<Searchbar />
+<Sliders Tours="@RecentTours" />
+<BannerWithButtom />
+<Footer />
+
+@code {
+    private List<TourDto> RecentTours { get; set; } = new();
+}
+```
+</Accordion>
+
+## Services Directory
+
+The `Services/` directory contains all business logic organized by domain:
+
+### Authentication Services
+
+<Accordion title="Services/Auth/" defaultOpen>
+**Files**:
+- `AuthService.cs` - User authentication, registration, profile management
+- `IAuthService` interface - Service contract
+- `PasswordResetService.cs` - Password reset functionality
+- `UserSession.cs` - Scoped session state management
+
+**Responsibilities**:
+- PBKDF2 password hashing (100,000 iterations)
+- JWT token generation via `IJwtTokenService`
+- User profile CRUD operations
+- Role verification
+- Last login tracking
+
+**Key Methods**:
+```csharp AuthService.cs:37-91
+public async Task<AuthResult> SignInAsync(
+    LoginRequest request, 
+    CancellationToken cancellationToken = default)
+{
+    // Query user from database
+    // Verify password with PBKDF2
+    // Generate JWT token
+    // Update last login timestamp
+    // Return auth result with user info
+}
+
+public async Task<RegisterResult> RegisterAsync(
+    RegisterRequest request, 
+    CancellationToken cancellationToken = default)
+{
+    // Hash password
+    // Call sp_Usuarios_Registrar stored procedure
+    // Assign default role (RolId = 1)
+    // Update profile photo if provided
+    // Return registration result
+}
+```
+
+**Location References**:
+- Password hashing: `AuthService.cs:205-216`
+- Password verification: `AuthService.cs:218-234`
+- Profile retrieval: `AuthService.cs:236-286`
+</Accordion>
+
+### JWT Services
+
+<Accordion title="Services/JWT/">
+**Files**:
+- `JwtTokenService.cs` - JWT generation and validation
+- `JwtOptions.cs` - Configuration binding class
+
+**Configuration**:
+```csharp Program.cs:22
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+```
+
+**JWT Claims**:
+- `ClaimTypes.NameIdentifier` - User ID
+- `ClaimTypes.Email` - User email
+- Custom claims for roles (if needed)
+</Accordion>
+
+### Tour Services
+
+<Accordion title="Services/Tour/">
+**Files**:
+- `TourService.cs` - Complete tour management service
+
+**Responsibilities**:
+- Tour CRUD operations (create, read, update, delete)
+- Tour search with filters and geolocation
+- Ticket type management (ages, prices, availability)
+- Extra items (add-ons) per ticket
+- Booking/reservation flow
+- Date availability and pricing
+- Tour statistics and analytics
+- Invoice generation
+
+**Stored Procedures Used**:
+- `sp_Tours_GetAll` - Fetch all tours
+- `sp_Tours_GetById` - Tour detail
+- `sp_Tours_Create` - Create new tour
+- `sp_Tours_Update` - Update existing tour
+- `sp_TourReservation_Create` - Create booking
+- `sp_TourReservation_GetByUser` - User bookings
+- ... (many more SPs for tickets, extras, stats)
+
+**Pattern**: Direct ADO.NET with SqlConnection, SqlCommand, and SqlDataReader
+</Accordion>
+
+### Email Services
+
+<Accordion title="Services/Email/ and Services/Mail/">
+**Email Implementation**:
+- `EmailService.cs` - SMTP email sending using MailKit
+- `IEmailService` interface
+- `SmtpOptions.cs` - Configuration options
+
+**Mail Queue**:
+- `MailService.cs` - High-level mail operations
+- `MailNotificationDispatcher.cs` - **Singleton** mail queue dispatcher
+
+**Configuration**:
+```json appsettings.json:18-27
+"Smtp": {
+  "Host": "smtp.gmail.com",
+  "Port": 587,
+  "UseSsl": false,
+  "UseStartTls": true,
+  "User": "designastudiou@gmail.com",
+  "Password": "jzqi fwxb zurj rdlu",
+  "FromEmail": "AndanDo@gmail.com",
+  "FromName": "AndanDO"
+}
+```
+
+**Registration**:
+```csharp Program.cs:27-30
+builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IMailService, MailService>();
+builder.Services.AddSingleton<MailNotificationDispatcher>();
+```
+</Accordion>
+
+### Payment Services
+
+<Accordion title="Services/Paypal/">
+**Files**:
+- `PaypalService.cs` - PayPal REST API integration
+- `IPaypalService` interface
+- `PaypalOptions.cs` - Configuration binding
+
+**Configuration**:
+```json appsettings.json:28-33
+"PayPal": {
+  "Mode": "sandbox",
+  "ClientId": "Ab76A0qILXO-h6926is0lH2xuGAPMB_Z...",
+  "ClientSecret": "EM-X5J8ka4gstL8McLxh69ZRZFY_QWrNm...",
+  "BaseUrl": "https://api-m.sandbox.paypal.com"
+}
+```
+
+**Registration**:
+```csharp Program.cs:31-32
+builder.Services.Configure<PaypalOptions>(builder.Configuration.GetSection("PayPal"));
+builder.Services.AddHttpClient<IPaypalService, PaypalService>();
+```
+
+**HttpClient Factory**: Used for resilient HTTP calls with connection pooling
+</Accordion>
+
+### Utility Services
+
+<Accordion title="Services/Utility/">
+**Files**:
+- `AssistanceTextService.cs` - Remote text assistance API
+- `CurrencyConversionService.cs` - Real-time currency exchange rates
+- `PostLikeService.cs` - Tour like/unlike functionality
+- `ReviewService.cs` - Tour reviews and ratings
+- `FormularioTipoService.cs` - Form type management
+- `AppUpdateService.cs` - Application update notifications
+
+**Registration**:
+```csharp Program.cs:34-41
+builder.Services.AddHttpClient<IAssistanceTextService, AssistanceTextService>();
+builder.Services.AddScoped<AssistanceTextService>();
+builder.Services.AddScoped<ICurrencyConversionService, CurrencyConversionService>();
+builder.Services.AddScoped<IAppUpdateService, AppUpdateService>();
+builder.Services.AddScoped<IPostLikeService, PostLikeService>();
+builder.Services.AddScoped<IFormularioTipoService, FormularioTipoService>();
+builder.Services.AddScoped<IReviewService, ReviewService>();
+```
+</Accordion>
+
+### Core Services
+
+<Accordion title="Services/Core/">
+**Files**:
+- `SettingsService.cs` - Application settings management
+
+**Registration**:
+```csharp Program.cs:41
+builder.Services.AddScoped<ISettingsService, SettingsService>();
+```
+
+**Purpose**: Platform-wide settings (maintenance mode, feature flags, etc.)
+</Accordion>
+
+## Data Transfer Objects (DTOs)
+
+The `Dtos/` directory contains all data transfer objects:
+
+<Accordion title="Dtos/" defaultOpen>
+**Files**:
+- `AuthDtos.cs` - Authentication-related DTOs
+  - `LoginRequest`, `RegisterRequest`, `AuthResult`
+  - `UserProfileDto`, `UpdateUserProfileRequest`, `ChangePasswordRequest`
+  - `HostAchievementDto`
+- `TourDtos.cs` - Tour-related DTOs (largest file, 7067 bytes)
+  - `TourDto`, `TourDetailDto`, `TourCreateRequest`
+  - `TourTicketTypeDto`, `TourExtraDto`, `TourItineraryDto`
+  - `TourReservationDto`, `TourReservationTicketDto`
+  - `TourStatsDto`, `TourFilterDto`
+- `SearchFilterDto.cs` - Search filter parameters
+- `PostLikeDtos.cs` - Like/unlike DTOs
+- `SlideDTO.cs` - Image slider DTOs
+- `FormularioTipoDto.cs` - Form type DTOs
+- `CoreSettingsDtos.cs` - Settings DTOs
+- `AppUpdateDtos.cs` - App update notification DTOs
+
+**Pattern**: C# records for immutability
+
+```csharp Dtos/AuthDtos.cs (conceptual example)
+public record LoginRequest(
+    string Email,
+    string Password
+);
+
+public record AuthResult(
+    int UserId,
+    string Email,
+    string Token,
+    string Nombre,
+    string? Apellido,
+    string? Telefono,
+    string? FotoPerfilUrl
+);
+```
+</Accordion>
+
+<Tip>
+**Why records?** C# records provide:
+- Immutability by default
+- Value-based equality (compares values, not references)
+- Concise syntax
+- Built-in `ToString()` implementation
+- Deconstruction support
+</Tip>
+
+## Static Files (wwwroot)
+
+The `wwwroot/` directory serves static assets:
+
+<Accordion title="wwwroot/" defaultOpen>
+**Structure**:
+```
+wwwroot/
+├── assets/                      # Theme assets
+│   ├── css/
+│   │   ├── main.css            # Primary stylesheet
+│   │   └── vendors.css         # Third-party CSS
+│   ├── js/
+│   │   ├── main.js             # Main JavaScript
+│   │   └── vendors.js          # Third-party JS
+│   └── img/
+│       ├── andando_logo.png    # AndanDo logo
+│       ├── DesignaLogo.png     # Partner logo
+│       └── placeholder-tour.jpg # Default tour image
+├── lib/                         # Third-party libraries
+│   └── bootstrap/
+│       └── dist/
+├── template/                    # HTML templates
+│   └── Factura_Template.html   # Invoice template
+├── uploads/                     # User-uploaded images
+│   └── (tour images, profile pics)
+├── logros/                      # Achievement badge images
+├── js/                          # Custom JavaScript
+│   ├── chart-helper.js         # Chart.js helpers
+│   └── tour-map.js             # Map initialization
+├── app.css                      # Application styles
+├── favicon.png                  # Favicon
+└── favicontext.png             # Alternative favicon
+```
+
+**Upload Handling**:
+- Tour images: Saved to `wwwroot/uploads/`
+- Naming: Usually `{TourId}_{timestamp}.jpg`
+- Access: Served as static files at `/uploads/{filename}`
+
+**Invoice Template**:
+```html template/Factura_Template.html (conceptual)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Factura - {{ReservationId}}</title>
+</head>
+<body>
+    <h1>AndanDo - Factura</h1>
+    <p>Reserva: {{ReservationId}}</p>
+    <p>Cliente: {{ClientName}}</p>
+    <!-- Placeholder values replaced by Invoice.razor -->
+</body>
+</html>
+```
+</Accordion>
+
+<Warning>
+The `wwwroot/uploads/` directory should be included in `.gitignore` to avoid committing user uploads to version control.
+</Warning>
+
+## Configuration Files
+
+### Project File
+
+<Accordion title="AndanDo.csproj">
+```xml AndanDo.csproj:1-28
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MailKit" Version="4.14.1" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.3" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Services\Auth\" />
+    <Folder Include="Services\JWT\" />
+    <Folder Include="Services\Email\" />
+    <Folder Include="Services\Core\" />
+    <Folder Include="Services\Utility\" />
+    <Folder Include="Services\Tour\" />
+    <Folder Include="wwwroot\uploads\" />
+  </ItemGroup>
+</Project>
+```
+
+**Key Properties**:
+- `net10.0` target (can be downgraded to `net8.0` if needed)
+- Nullable reference types enabled
+- Implicit usings for common namespaces
+- Blazor navigation exception suppression
+</Accordion>
+
+### Application Settings
+
+<Accordion title="appsettings.json">
+```json appsettings.json:1-36
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=68.178.201.124;Database=AndandoDB;..."
+  },
+  "Jwt": {
+    "Issuer": "AndanDo",
+    "Audience": "AndanDo",
+    "SecretKey": "c0d3x-andando-dev-secret-key-please-change-123456",
+    "ExpirationMinutes": 120
+  },
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "designastudiou@gmail.com",
+    "Password": "jzqi fwxb zurj rdlu",
+    "FromEmail": "AndanDo@gmail.com",
+    "FromName": "AndanDO"
+  },
+  "PayPal": {
+    "Mode": "sandbox",
+    "ClientId": "Ab76A0qILXO-h6926is0lH2xuGAPMB_Z...",
+    "ClientSecret": "EM-X5J8ka4gstL8McLxh69ZRZFY_QWrNm...",
+    "BaseUrl": "https://api-m.sandbox.paypal.com"
+  }
+}
+```
+
+**Configuration Sections**:
+- `ConnectionStrings` - Database connection
+- `Jwt` - JWT token settings
+- `Smtp` - Email server configuration
+- `PayPal` - Payment gateway settings
+</Accordion>
+
+<Accordion title="appsettings.Development.json">
+```json appsettings.Development.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Debug",
+      "Microsoft.AspNetCore": "Information"
+    }
+  },
+  "DetailedErrors": true
+}
+```
+
+**Development Overrides**:
+- More verbose logging
+- Detailed error pages
+- Can override connection strings for local database
+</Accordion>
+
+### Program.cs
+
+<Accordion title="Program.cs - Application Entry Point">
+```csharp Program.cs:1-70
+using AndanDo.Components;
+using AndanDo.Services.Auth;
+using AndanDo.Services.Mail;
+// ... (more service imports)
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Blazor services
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+// Register application services (lines 20-41)
+// Configure options from appsettings.json
+// Add authentication and authorization
+
+var app = builder.Build();
+
+// Configure middleware pipeline (lines 50-67)
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
+app.UseStatusCodePagesWithReExecute("/not-found");
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+app.UseAntiforgery();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapStaticAssets();
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();
+```
+
+**Sections**:
+1. **Lines 1-11**: Imports and builder setup
+2. **Lines 16-45**: Service registration and DI configuration
+3. **Lines 47-68**: Middleware pipeline and routing
+</Accordion>
+
+## Naming Conventions
+
+### File Naming
+
+<CardGroup cols={2}>
+  <Card title="Razor Components" icon="file-code">
+    PascalCase with `.razor` extension
+    <br />Example: `TourDetails.razor`
+  </Card>
+  <Card title="C# Classes" icon="file">
+    PascalCase with `.cs` extension
+    <br />Example: `AuthService.cs`
+  </Card>
+  <Card title="CSS Files" icon="paintbrush">
+    kebab-case or match component name
+    <br />Example: `NavMenu.razor.css`
+  </Card>
+  <Card title="JavaScript" icon="js">
+    kebab-case with `.js` extension
+    <br />Example: `chart-helper.js`
+  </Card>
+</CardGroup>
+
+### Code Conventions
+
+<Accordion title="C# Naming Standards">
+**Classes & Interfaces**:
+- PascalCase: `AuthService`, `ITourService`
+- Interfaces start with `I`: `IAuthService`
+
+**Methods**:
+- PascalCase: `SignInAsync()`, `GetTourByIdAsync()`
+- Async methods end with `Async`
+
+**Properties**:
+- PascalCase: `UserId`, `Email`, `PasswordHash`
+
+**Private Fields**:
+- camelCase with underscore prefix: `_connectionString`, `_jwtTokenService`
+
+**Constants**:
+- PascalCase: `Pbkdf2Iterations`, `Pbkdf2SaltSize`
+
+**Parameters**:
+- camelCase: `userId`, `cancellationToken`
+</Accordion>
+
+<Accordion title="Razor Component Conventions">
+**Directives**:
+```razor
+@page "/route"              <!-- Route definition -->
+@layout LayoutName          <!-- Layout assignment -->
+@inject IService Service    <!-- Dependency injection -->
+@using Namespace            <!-- Namespace import -->
+@attribute [Authorize]      <!-- Attributes -->
+```
+
+**Code Blocks**:
+```razor
+@code {
+    [Parameter]
+    public int TourId { get; set; }  // Pascal-cased parameters
+    
+    private TourDto? Tour { get; set; }  // Nullable for async load
+    
+    protected override async Task OnInitializedAsync()
+    {
+        // Initialization logic
+    }
+}
+```
+
+**HTML/Markup**:
+- Use semantic HTML5 elements
+- Follow Blazor component naming: `<ComponentName />`
+</Accordion>
+
+### Database Conventions
+
+<Accordion title="Stored Procedure Naming">
+**Pattern**: `sp_{Entity}_{Action}`
+
+**Examples**:
+- `sp_Tours_GetAll` - Get all tours
+- `sp_Tours_GetById` - Get single tour
+- `sp_Tours_Create` - Create new tour
+- `sp_Tours_Update` - Update tour
+- `sp_Usuarios_Registrar` - Register user
+- `sp_TourReservation_Create` - Create booking
+- `sp_HostAchievements_GetByUser` - Get user achievements
+
+**Table Names**: PascalCase, usually plural
+- `Usuarios`, `Tours`, `TourReservation`, `UsuarioRoles`
+
+**Column Names**: PascalCase
+- `UsuarioId`, `Email`, `ContrasenaHash`, `FechaCreacion`
+</Accordion>
+
+## Development Workflow
+
+### File Location Guide
+
+<CardGroup cols={2}>
+  <Card title="Adding a Page" icon="file-circle-plus">
+    Create `.razor` file in `Components/Pages/` with `@page` directive
+  </Card>
+  <Card title="Adding a Service" icon="gear">
+    Create interface + implementation in `Services/{Domain}/`
+  </Card>
+  <Card title="Adding a DTO" icon="box">
+    Add record to existing or new file in `Dtos/`
+  </Card>
+  <Card title="Adding Static Assets" icon="image">
+    Place in `wwwroot/assets/` or `wwwroot/uploads/`
+  </Card>
+</CardGroup>
+
+### Service Registration Checklist
+
+When adding a new service:
+
+1. **Create interface** in `Services/{Domain}/I{ServiceName}.cs`
+2. **Create implementation** in `Services/{Domain}/{ServiceName}.cs`
+3. **Register in Program.cs**:
+   ```csharp
+   builder.Services.AddScoped<IMyService, MyService>();
+   ```
+4. **Inject in components**:
+   ```razor
+   @inject IMyService MyService
+   ```
+
+### Component Creation Checklist
+
+When adding a new page:
+
+1. **Create `.razor` file** in `Components/Pages/`
+2. **Add `@page` directive** with route
+3. **Inject required services**
+4. **Add to navigation** (if needed) in `NavMenu.razor` or `DashNavMenu.razor`
+5. **Apply authorization** (if needed):
+   ```razor
+   @attribute [Authorize]
+   ```
+
+## Code Organization Best Practices
+
+<Note>
+**Separation of Concerns**:
+- **Components**: UI rendering and user interactions only
+- **Services**: Business logic, data access, external APIs
+- **DTOs**: Data contracts, no logic
+- **wwwroot**: Static assets, no dynamic code
+</Note>
+
+<Tip>
+**Dependency Injection Best Practices**:
+- Inject interfaces, not concrete types
+- Use constructor injection in services
+- Use `@inject` directive in components
+- Prefer scoped lifetime for per-request services
+- Use singleton only for stateless, thread-safe services
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/development/architecture">
+    Understand the system architecture and design patterns
+  </Card>
+  <Card title="Tech Stack" icon="layer-group" href="/development/tech-stack">
+    Explore the technologies and frameworks used
+  </Card>
+  <Card title="Database Schema" icon="database" href="/configuration/database">
+    Learn about database tables and relationships
+  </Card>
+  <Card title="Contributing" icon="code-pull-request">
+    Guidelines for contributing to the codebase
+  </Card>
+</CardGroup>

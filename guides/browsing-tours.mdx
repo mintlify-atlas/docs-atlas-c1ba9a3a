@@ -1,0 +1,257 @@
+---
+title: 'Browsing Tours'
+description: 'Discover and explore tours on AndanDo marketplace'
+---
+
+## Overview
+
+The AndanDo marketplace provides an intuitive interface for discovering unique tour experiences. This guide will help you navigate the platform, use search and filtering features, and find the perfect tour for your next adventure.
+
+## Accessing the Marketplace
+
+<Steps>
+  <Step title="Navigate to Marketplace">
+    Visit `/marketplace` to access the main tour browsing interface. The marketplace displays all active and upcoming tours in a card-based grid layout.
+  </Step>
+  
+  <Step title="Explore Tour Cards">
+    Each tour card displays:
+    - High-quality tour image or "Próximamente" placeholder for upcoming tours
+    - Location with pin icon
+    - Tour title
+    - Star rating and review count
+    - Price starting from (in RD$)
+    - "Ver" button to view details
+  </Step>
+</Steps>
+
+## Search and Discovery
+
+### Using the Search Bar
+
+The marketplace hero section features a prominent search bar that accepts:
+
+<CardGroup cols={2}>
+  <Card title="Tour Names" icon="magnifying-glass">
+    Search by the tour title or service name to find specific experiences
+  </Card>
+  
+  <Card title="Locations" icon="map-pin">
+    Enter city names, regions, or landmarks to discover tours in specific areas
+  </Card>
+</CardGroup>
+
+<Info>
+  The search is **case-insensitive** and matches partial keywords across tour names and locations.
+</Info>
+
+### Search Implementation
+
+The search functionality (in `Marketplace.razor:414`) uses reactive binding:
+
+```razor
+<input class="mp-search-input"
+       type="text"
+       placeholder="Buscar por nombre o ubicación..."
+       @bind="_searchQuery"
+       @bind:event="oninput" />
+```
+
+Results update automatically as you type, filtering tours based on:
+- Tour title
+- Location label
+
+## Filtering Tours
+
+AndanDo provides multiple filter options to refine your search:
+
+### Filter Categories
+
+<Accordion title="Duration Filters">
+  - **Corta duración**: Tours lasting hours or including "hora" or "min" in duration
+  - **Larga duración**: Multi-day tours including "día", "dia", or "semana" in duration
+  
+  Duration filters use heuristic matching based on `DurationLabel` keywords (see `Marketplace.razor:690-704`).
+</Accordion>
+
+<Accordion title="Price Filters">
+  - **Económico**: Tours priced at or below RD$3,000
+  - **Premium**: Tours priced above RD$3,000
+  
+  Price filtering uses the `FromPrice` property from active ticket types.
+</Accordion>
+
+<Accordion title="Availability Filter">
+  - **Próximamente**: Shows only upcoming tours that haven't started selling tickets yet
+  
+  Tours marked as upcoming display a gray placeholder instead of an image and are non-clickable until they become available.
+</Accordion>
+
+<Tip>
+  You can combine multiple filters! For example, filter by "Económico" + "Corta duración" to find affordable day trips.
+</Tip>
+
+### Clearing Filters
+
+Click the **"Todos"** chip to reset all active filters and return to the full tour listing.
+
+## Sorting Options
+
+Use the sort dropdown to organize results:
+
+<CardGroup cols={3}>
+  <Card title="Predeterminado" icon="list">
+    Default marketplace order
+  </Card>
+  
+  <Card title="Precio: Menor a mayor" icon="arrow-up-1-9">
+    Shows most affordable tours first
+  </Card>
+  
+  <Card title="Precio: Mayor a menor" icon="arrow-down-9-1">
+    Shows premium experiences first
+  </Card>
+</CardGroup>
+
+## Liking Tours
+
+Save your favorite tours for later by clicking the **heart icon** on any tour card.
+
+<Steps>
+  <Step title="Locate the Heart Button">
+    The heart icon appears in the top-right corner of each tour image (`Marketplace.razor:556-572`).
+  </Step>
+  
+  <Step title="Click to Like">
+    Click the heart to save the tour. The button changes color to indicate it's liked.
+  </Step>
+  
+  <Step title="Authentication Required">
+    If you're not logged in, you'll see a toast message: "Inicia sesión para dar like."
+  </Step>
+</Steps>
+
+<Note>
+  Your likes are stored persistently in the database using `PostLikeService`. You can view all your liked tours from your profile.
+</Note>
+
+### Like Functionality Code
+
+The like system integrates with the backend:
+
+```csharp
+private async Task ToggleLikeAsync(TourCardViewModel card)
+{
+    if (!Session.IsAuthenticated || Session.Current is null)
+    {
+        await ShowLikeToastAsync("Inicia sesion para dar like.", card.Tour.TourId);
+        return;
+    }
+    
+    if (IsLiked(card.Tour.TourId))
+    {
+        await PostLikeService.RemoveLikeAsync(Session.Current.UserId, card.Tour.TourId);
+        _likedTours.Remove(card.Tour.TourId);
+    }
+    else
+    {
+        await PostLikeService.AddLikeAsync(Session.Current.UserId, card.Tour.TourId);
+        _likedTours.Add(card.Tour.TourId);
+    }
+}
+```
+
+## Pagination
+
+The marketplace displays 12 tours per page. Navigate between pages using:
+
+- **Arrow buttons**: Previous/Next page navigation
+- **Page numbers**: Click any number to jump to that page
+- **Ellipsis (...)**: Indicates skipped page numbers in large result sets
+
+<Info>
+  The current page is highlighted in orange, and pagination controls are disabled when reaching the first or last page.
+</Info>
+
+## Tour Visibility Rules
+
+Not all tours appear in the marketplace. Tours are filtered based on:
+
+<Steps>
+  <Step title="Status Check">
+    Inactive tours (Status = "I") are excluded from search results (`Marketplace.razor:950-953`).
+  </Step>
+  
+  <Step title="Date-Based Visibility">
+    Tours past their end date are automatically hidden. Upcoming tours only show if within 3 days of start date (unless `MuestraInstantanea` is enabled).
+  </Step>
+  
+  <Step title="Ticket Availability">
+    Tours display their minimum price only if active tickets are currently available for sale.
+  </Step>
+</Steps>
+
+## Mobile Experience
+
+The marketplace is fully responsive:
+
+- **Grid adapts** from 4 columns on desktop to 2 on tablet and 1 on mobile
+- **Search bar** maintains full functionality
+- **Filter chips** wrap gracefully on smaller screens
+- **Touch-friendly** card interactions
+
+```css
+@media (max-width: 640px) {
+    .mp-hero { padding: 30px 0 24px; }
+    .mp-grid { grid-template-columns: 1fr 1fr; gap: 14px; }
+}
+@media (max-width: 420px) {
+    .mp-grid { grid-template-columns: 1fr; }
+}
+```
+
+## Search Results Page
+
+Beyond the main marketplace, AndanDo offers a dedicated search results page at `/search`:
+
+### Search URL Parameters
+
+<CardGroup cols={2}>
+  <Card title="Plain Query" icon="text">
+    Use `?q=keyword` for simple text searches
+  </Card>
+  
+  <Card title="Encoded Filter" icon="filter">
+    Use `?f=base64url` for advanced filters including location, coordinates, and dates
+  </Card>
+</CardGroup>
+
+### Search Filter DTO
+
+The search page accepts structured filters:
+
+```csharp
+public sealed record SearchFilterDto(
+    string? Location,
+    string? NearLabel,
+    double? Latitude,
+    double? Longitude,
+    string? DateLabel
+);
+```
+
+<Tip>
+  The search page displays active filters as chips at the top, making it easy to see what criteria are being applied.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Making Reservations" icon="ticket" href="/guides/making-reservations">
+    Learn how to book tours and complete the checkout process
+  </Card>
+  
+  <Card title="Reviews & Likes" icon="star" href="/guides/reviews-and-likes">
+    Discover how to leave reviews and manage your liked tours
+  </Card>
+</CardGroup>

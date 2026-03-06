@@ -1,0 +1,335 @@
+---
+title: 'Host Overview'
+description: 'Discover the powerful features available to tour and experience hosts on AndanDo'
+icon: 'compass'
+---
+
+## Welcome to AndanDo for Hosts
+
+AndanDo is a comprehensive tour marketplace platform that empowers hosts to create, manage, and grow their tour and experience businesses. Built with Blazor Server and .NET, the platform provides a robust suite of tools designed specifically for tour operators and experience creators.
+
+<CardGroup cols={2}>
+  <Card title="Dashboard Analytics" icon="chart-line" href="/hosts/dashboard">
+    Track bookings, revenue, and performance metrics in real-time
+  </Card>
+  <Card title="Tour Management" icon="map-location-dot" href="/hosts/creating-tours">
+    Create and manage your tours with flexible pricing and scheduling
+  </Card>
+  <Card title="Booking System" icon="calendar-check" href="/hosts/managing-bookings">
+    Manage reservations with QR codes and payment tracking
+  </Card>
+  <Card title="Payment Methods" icon="credit-card" href="/hosts/invoices">
+    Accept payments via cards, PayPal, and bank transfers
+  </Card>
+</CardGroup>
+
+## Key Host Features
+
+### Comprehensive Dashboard
+
+Your host dashboard provides a complete overview of your business operations:
+
+<AccordionGroup>
+  <Accordion title="Real-Time Statistics" icon="chart-bar">
+    Monitor your performance with live metrics:
+    - **Total Tickets**: Track all tickets sold for your events
+    - **Reservations**: View booking counts and trends
+    - **Revenue**: Monitor total sales and payment status
+    - **Travel Dates**: See upcoming tour schedules at a glance
+  </Accordion>
+
+  <Accordion title="Reservation Management" icon="list-check">
+    Access detailed reservation information:
+    - Customer details with avatar initials
+    - Ticket breakdown by type and quantity
+    - Payment status (Paid, Pending, Partial, Cancelled)
+    - Individual QR codes for each ticket
+    - Service charge calculations
+  </Accordion>
+
+  <Accordion title="Event Selection" icon="filter">
+    The dashboard allows you to:
+    - Filter data by specific tour/event
+    - View aggregated statistics per event
+    - Generate reports for individual tours
+    - Track performance across your portfolio
+  </Accordion>
+</AccordionGroup>
+
+### Booking & Ticket Management
+
+AndanDo provides sophisticated tools for managing customer bookings:
+
+<Steps>
+  <Step title="View Reservations">
+    Access a detailed table showing:
+    - Reservation ID and customer information
+    - Travel date and creation timestamp
+    - Total tickets and payment amount
+    - Payment status badges
+  </Step>
+
+  <Step title="Expandable Details">
+    Click any reservation to expand and see:
+    - Complete ticket breakdown by type
+    - Individual ticket pricing
+    - Service charges and subtotals
+    - Payment schedule for partial payments
+  </Step>
+
+  <Step title="QR Code Access">
+    Generate and view QR codes for:
+    - Individual tickets (with slider navigation)
+    - Multiple tickets per reservation
+    - Easy verification at event entry
+  </Step>
+
+  <Step title="Reservation Actions">
+    Manage bookings with quick actions:
+    - View/download invoices
+    - Edit reservation details
+    - Cancel orders (if not fully paid)
+  </Step>
+</Steps>
+
+<Info>
+  **QR Code Verification**: Each ticket generates a unique QR code using the reservation code, accessible through a beautiful modal interface with navigation controls.
+</Info>
+
+### Profile Management
+
+Hosts can maintain their professional profile with:
+
+<CardGroup cols={2}>
+  <Card title="Personal Information" icon="user">
+    - Name and surname
+    - Email (read-only after registration)
+    - Phone number
+    - Country and city
+  </Card>
+  <Card title="Profile Photo" icon="image">
+    - URL-based photo upload
+    - Real-time preview
+    - Avatar with initials fallback
+  </Card>
+  <Card title="Account Security" icon="lock">
+    - Password change functionality
+    - Current password verification
+    - Minimum 6-character requirement
+  </Card>
+  <Card title="Account Status" icon="info-circle">
+    - Active/inactive status
+    - Lock status
+    - Last login timestamp
+  </Card>
+</CardGroup>
+
+### Payment Configuration
+
+The platform supports multiple payment methods that hosts can configure:
+
+<Tabs>
+  <Tab title="Card Payments">
+    Integrate with card processors (e.g., Stripe):
+    ```csharp
+    // Configuration fields
+    - Public Key (pk_live_...)
+    - Secret Key (sk_live_...)
+    - Webhook Secret (whsec_...)
+    ```
+    Enable/disable with toggle switch
+  </Tab>
+
+  <Tab title="PayPal">
+    Accept PayPal payments:
+    ```csharp
+    // Configuration fields
+    - Client ID
+    - Secret Key
+    - Mode (Sandbox/Production)
+    ```
+    Flexible environment switching
+  </Tab>
+
+  <Tab title="Bank Transfer">
+    Manual payment verification:
+    ```csharp
+    // Configuration fields
+    - Bank Name
+    - Account Holder
+    - Account Number
+    - Custom Instructions
+    ```
+    Perfect for local markets
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Payment Security**: Payment credentials are sensitive. The platform uses secure storage and follows industry best practices for handling financial data.
+</Warning>
+
+## Authentication & Security
+
+AndanDo implements robust authentication using industry-standard security practices:
+
+### Password Security
+
+The platform uses **PBKDF2** (Password-Based Key Derivation Function 2) for password hashing:
+
+```csharp Components/Pages/Login_Account.razor
+// Password hashing configuration
+Iterations: 100,000
+Salt Size: 16 bytes
+Key Size: 32 bytes
+Algorithm: SHA256
+```
+
+<Note>
+  Passwords are never stored in plain text. The system uses a salt and 100,000 iterations to protect against brute-force attacks.
+</Note>
+
+### Session Management
+
+Hosts benefit from secure session handling:
+
+- **JWT Token Authentication**: Tokens are generated upon successful login
+- **Protected Local Storage**: Session data is encrypted in browser storage
+- **Remember Email**: Optional email persistence for convenience
+- **Last Login Tracking**: Automatic timestamp updates on each login
+
+```csharp Services/Auth/AuthService.cs
+// Session updates on login
+await UpdateUltimoLoginAsync(connection, userId, cancellationToken);
+var token = _jwtTokenService.GenerateToken(new UserIdentity(userId, email));
+```
+
+## Role-Based Access
+
+The platform implements a role-based permission system:
+
+<Steps>
+  <Step title="User Registration">
+    New accounts are automatically assigned the base user role (RolId = 1)
+    ```csharp
+    await EnsureRoleAssignmentAsync(connection, userId, 1, cancellationToken);
+    ```
+  </Step>
+
+  <Step title="Role Verification">
+    The system can check if a user has specific roles:
+    ```csharp
+    Task<bool> IsUserInRoleAsync(int userId, int roleId, CancellationToken cancellationToken)
+    ```
+  </Step>
+
+  <Step title="Permission Enforcement">
+    Access to host features is controlled through role checks in the dashboard layout
+  </Step>
+</Steps>
+
+## Host Achievements
+
+The platform includes a gamification system to recognize host milestones:
+
+```csharp Services/Auth/AuthService.cs
+public async Task<IReadOnlyList<HostAchievementDto>> GetHostAchievementsAsync(
+    int userId,
+    int take = 3,
+    CancellationToken cancellationToken = default)
+{
+    // Retrieves unlocked achievements for display
+    // Returns: AchievementId, Codigo, Titulo, Descripcion, BadgeUrl, DesbloqueadoEn
+}
+```
+
+<Card title="Achievement Tracking" icon="trophy">
+  - Achievement codes and titles
+  - Custom badge URLs
+  - Unlock timestamps
+  - Top 3 most recent achievements displayed by default
+</Card>
+
+## Data Models
+
+Understanding the core data structures helps hosts make the most of the platform:
+
+### User Profile Structure
+
+```csharp Dtos/AuthDtos.cs
+public record UserProfileDto(
+    int UsuarioId,
+    string Email,
+    string? Nombre,
+    string? Apellido,
+    string? Telefono,
+    string? Pais,
+    string? Ciudad,
+    string? FotoPerfilUrl,
+    bool EstaActivo,
+    bool EstaBloqueado,
+    DateTime? FechaCreacion,
+    DateTime? FechaActualizacion,
+    DateTime? UltimoLogin);
+```
+
+### Authentication Result
+
+```csharp Dtos/AuthDtos.cs
+public record AuthResult(
+    int UserId,
+    string Email,
+    string Token,
+    string Nombre,
+    string? Apellido,
+    string? Telefono,
+    string? FotoPerfilUrl);
+```
+
+## Mobile-Responsive Design
+
+All host features are fully optimized for mobile devices:
+
+<CardGroup cols={2}>
+  <Card title="Adaptive Layouts" icon="mobile">
+    Dashboard and profile pages automatically adjust for mobile screens with dedicated mobile components
+  </Card>
+  <Card title="Touch-Friendly" icon="hand-pointer">
+    All interactive elements are optimized for touch input with appropriate sizing
+  </Card>
+  <Card title="Mobile Menu" icon="bars">
+    Dedicated mobile navigation menu with overlay and smooth animations
+  </Card>
+  <Card title="Responsive Tables" icon="table">
+    Reservation tables adapt to smaller screens without losing functionality
+  </Card>
+</CardGroup>
+
+<Tip>
+  The platform detects screen size using CSS media queries (`@media (max-width: 768px)`) and automatically switches to mobile-optimized components.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Create Your Account" icon="user-plus" href="/hosts/creating-account">
+    Get started by setting up your host account
+  </Card>
+  <Card title="Set Up Your First Tour" icon="route" href="/hosts/creating-tours">
+    Learn how to create and publish your first tour
+  </Card>
+  <Card title="Configure Payments" icon="money-bill-wave" href="/configuration/paypal">
+    Set up your payment methods to start accepting bookings
+  </Card>
+  <Card title="Manage Bookings" icon="clipboard-list" href="/hosts/managing-bookings">
+    Master the booking management tools
+  </Card>
+</CardGroup>
+
+## Support & Resources
+
+<Card title="Need Help?" icon="question-circle">
+  If you have questions about using AndanDo as a host:
+  - Check our comprehensive guides in the documentation
+  - Review the API reference for integration options
+  - Contact support through your dashboard
+</Card>

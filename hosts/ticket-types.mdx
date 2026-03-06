@@ -1,0 +1,483 @@
+---
+title: 'Ticket Types & Capacity'
+description: 'Configure ticket categories, pricing, age restrictions, and capacity management'
+icon: 'ticket'
+---
+
+## Overview
+
+Ticket types allow you to offer different pricing tiers based on age, group type, or other factors. Each tour can have multiple ticket types with independent pricing, capacity limits, and sale windows.
+
+<Info>
+  Every tour must have **at least one active ticket type** to be bookable on the marketplace.
+</Info>
+
+## Ticket Type Structure
+
+Ticket types are stored in the `TourTicketType` table with the following properties:
+
+```csharp
+public record TourTicketTypeRequest(
+    string Name,                // "Adult", "Child", "Senior"
+    int? MinAge,                // Minimum age (optional)
+    int? MaxAge,                // Maximum age (optional)
+    decimal? Price,             // Base price
+    string CurrencyCode,        // "USD", "DOP", "EUR"
+    int SortOrder,              // Display order
+    int? CapacidadPorTipo,      // Per-type capacity limit
+    DateTime? VentaInicioUtc,   // Sale start date
+    DateTime? VentaFinUtc,      // Sale end date
+    int? MaxPorOrden,           // Max per order
+    int? MaxPorUsuario);        // Max per customer
+```
+
+## Common Ticket Type Configurations
+
+<CardGroup cols={2}>
+  <Card title="Adult Tickets" icon="user">
+    **Typical setup:**
+    - Name: "Adult"
+    - MinAge: 18
+    - MaxAge: null (no upper limit)
+    - Price: Full price
+    
+    **Example:** $75 USD per adult
+  </Card>
+
+  <Card title="Child Tickets" icon="child">
+    **Typical setup:**
+    - Name: "Child"
+    - MinAge: 3
+    - MaxAge: 17
+    - Price: Discounted (50-70% of adult)
+    
+    **Example:** $40 USD per child
+  </Card>
+
+  <Card title="Senior Tickets" icon="user-tie">
+    **Typical setup:**
+    - Name: "Senior (65+)"
+    - MinAge: 65
+    - MaxAge: null
+    - Price: Discounted (80-90% of adult)
+    
+    **Example:** $60 USD per senior
+  </Card>
+
+  <Card title="Group Tickets" icon="users">
+    **Typical setup:**
+    - Name: "Group (10+)"
+    - MinAge: null
+    - MaxAge: null
+    - Price: Bulk discount rate
+    
+    **Example:** $65 USD per person (groups of 10+)
+  </Card>
+</CardGroup>
+
+## Creating Ticket Types
+
+<Steps>
+  <Step title="Access Step 4 of Tour Creation">
+    Navigate to "Ticket Types & Extras" in the tour wizard.
+  </Step>
+
+  <Step title="Add Ticket Type">
+    Click "Add Ticket Type" to create a new pricing tier.
+    
+    ```razor
+    <button type="button" 
+            @onclick="AddTicketType" 
+            class="button -sm -dark-1 bg-accent-1 text-white">
+      Add Ticket Type
+    </button>
+    ```
+  </Step>
+
+  <Step title="Configure Properties">
+    Fill in the ticket type details:
+    - Name (required)
+    - Price and currency
+    - Age restrictions (optional)
+    - Capacity limits (optional)
+    - Sale window (optional)
+  </Step>
+
+  <Step title="Save Configuration">
+    The system calls `UpsertTicketTypesAsync` to store all ticket types.
+  </Step>
+</Steps>
+
+## Capacity Management
+
+### Per-Type Capacity
+
+Limit the number of tickets available for each type:
+
+```csharp
+CapacidadPorTipo = 20 // Max 20 child tickets
+```
+
+<Accordion title="How Capacity is Tracked">
+  The system queries reserved tickets in real-time:
+  
+  ```csharp
+  public async Task<Dictionary<int, int>> GetTicketTypeReservedCountAsync(
+      int tourId,
+      CancellationToken cancellationToken = default)
+  {
+      var result = new Dictionary<int, int>();
+      if (tourId <= 0)
+      {
+          return result;
+      }
+
+      await using var connection = CreateConnection();
+      await connection.OpenAsync(cancellationToken);
+
+      const string sql = """
+          SELECT 
+              ttt.TourTicketTypeId,
+              COUNT(trt.TourReservationTicketId) AS ReservedCount
+          FROM TourTicketType ttt
+          LEFT JOIN TourReservationTicket trt ON trt.TourTicketTypeId = ttt.TourTicketTypeId
+          LEFT JOIN TourReservation r ON r.TourReservationId = trt.TourReservationId
+          WHERE ttt.TourId = @TourId
+          GROUP BY ttt.TourTicketTypeId
+      """;
+
+      await using var command = new SqlCommand(sql, connection);
+      command.Parameters.Add(new SqlParameter("@TourId", SqlDbType.Int) { Value = tourId });
+
+      await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+      while (await reader.ReadAsync(cancellationToken))
+      {
+          var ticketTypeId = reader.GetInt32(reader.GetOrdinal("TourTicketTypeId"));
+          var reserved = reader.IsDBNull(reader.GetOrdinal("ReservedCount"))
+              ? 0
+              : reader.GetInt32(reader.GetOrdinal("ReservedCount"));
+
+          result[ticketTypeId] = reserved;
+      }
+
+      return result;
+  }
+  ```
+  
+  **Capacity check formula:**
+  ```
+  Available = CapacidadPorTipo - ReservedCount
+  ```
+</Accordion>
+
+### Retrieving Capacity Limits
+
+```csharp
+public async Task<Dictionary<int, int?>> GetTicketTypeCapacityAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+{
+    var result = new Dictionary<int, int?>();
+    if (tourId <= 0)
+    {
+        return result;
+    }
+
+    await using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        SELECT TourTicketTypeId, CapacidadPorTipo
+        FROM TourTicketType
+        WHERE TourId = @TourId
+    """;
+
+    await using var command = new SqlCommand(sql, connection);
+    command.Parameters.Add(new SqlParameter("@TourId", SqlDbType.Int) { Value = tourId });
+
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        var ticketTypeId = reader.GetInt32(reader.GetOrdinal("TourTicketTypeId"));
+        int? capacidad = reader.IsDBNull(reader.GetOrdinal("CapacidadPorTipo"))
+            ? (int?)null
+            : reader.GetInt32(reader.GetOrdinal("CapacidadPorTipo"));
+
+        result[ticketTypeId] = capacidad;
+    }
+
+    return result;
+}
+```
+
+<Warning>
+  If `CapacidadPorTipo` is `null`, the ticket type has unlimited availability. Use this carefully for high-demand tours.
+</Warning>
+
+## Order & Customer Limits
+
+### Max Per Order
+
+Limit how many tickets of this type can be purchased in a single order:
+
+```csharp
+MaxPorOrden = 4 // Max 4 child tickets per order
+```
+
+**Use case:** Prevent bulk purchases that could lock out other customers.
+
+### Max Per Customer
+
+Limit total tickets of this type per customer (across all orders):
+
+```csharp
+MaxPorUsuario = 10 // Max 10 tickets per customer lifetime
+```
+
+**Use case:** Fair distribution for popular events or limited-capacity tours.
+
+<Info>
+  Both limits are optional. Leave as `null` for no restrictions.
+</Info>
+
+## Sale Windows
+
+Control when tickets can be purchased:
+
+<CardGroup cols={2}>
+  <Card title="Sale Start Date" icon="calendar-day">
+    Tickets become available for purchase.
+    
+    ```csharp
+    VentaInicioUtc = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc)
+    ```
+  </Card>
+
+  <Card title="Sale End Date" icon="calendar-xmark">
+    Tickets stop being available for purchase.
+    
+    ```csharp
+    VentaFinUtc = new DateTime(2026, 12, 31, 23, 59, 59, DateTimeKind.Utc)
+    ```
+  </Card>
+</CardGroup>
+
+<Accordion title="Early Bird Pricing Strategy">
+  Create multiple ticket types with different sale windows:
+  
+  1. **Super Early Bird** (3+ months out)
+     - VentaInicioUtc: 90 days before tour
+     - VentaFinUtc: 60 days before tour
+     - Price: $60 (20% off)
+  
+  2. **Early Bird** (1-2 months out)
+     - VentaInicioUtc: 60 days before tour
+     - VentaFinUtc: 30 days before tour
+     - Price: $70 (10% off)
+  
+  3. **Regular** (< 1 month)
+     - VentaInicioUtc: 30 days before tour
+     - VentaFinUtc: Day of tour
+     - Price: $75 (full price)
+</Accordion>
+
+## Currency Support
+
+AndanDo supports multiple currencies per tour:
+
+```csharp
+CurrencyCode = "USD" // or "DOP", "EUR"
+```
+
+### Supported Currencies
+
+| Code | Currency | Symbol |
+|------|----------|--------|
+| `USD` | US Dollar | $ |
+| `DOP` | Dominican Peso | RD$ |
+| `EUR` | Euro | € |
+
+<Tip>
+  All ticket types for a single tour should use the same currency for consistency. Mixing currencies is technically supported but not recommended.
+</Tip>
+
+## Upserting Ticket Types
+
+The system replaces all ticket types each time you save:
+
+```csharp
+public async Task UpsertTicketTypesAsync(
+    int tourId,
+    IEnumerable<TourTicketTypeRequest> tickets,
+    CancellationToken cancellationToken = default)
+{
+    if (tickets is null) return;
+
+    await using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+    await using var tx = await connection.BeginTransactionAsync(cancellationToken);
+
+    // Delete existing ticket types
+    const string deleteSql = "DELETE FROM TourTicketType WHERE TourId = @TourId;";
+    await using (var deleteCmd = new SqlCommand(deleteSql, connection, (SqlTransaction)tx))
+    {
+        deleteCmd.Parameters.Add(new SqlParameter("@TourId", SqlDbType.Int) { Value = tourId });
+        await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    // Insert new ticket types
+    const string insertSql = @"
+INSERT INTO TourTicketType
+    (TourId, Name, MinAge, MaxAge, Price, CurrencyCode, IsActive, SortOrder, 
+     CapacidadPorTipo, VentaInicioUtc, VentaFinUtc, MaxPorOrden, MaxPorUsuario)
+VALUES
+    (@TourId, @Name, @MinAge, @MaxAge, @Price, @CurrencyCode, 1, @SortOrder, 
+     @CapacidadPorTipo, @VentaInicioUtc, @VentaFinUtc, @MaxPorOrden, @MaxPorUsuario);";
+
+    foreach (var ticket in tickets)
+    {
+        await using var command = new SqlCommand(insertSql, connection, (SqlTransaction)tx);
+        command.Parameters.Add(new SqlParameter("@TourId", SqlDbType.Int) { Value = tourId });
+        command.Parameters.AddWithValue("@Name", ticket.Name ?? string.Empty);
+        command.Parameters.AddWithValue("@MinAge", (object?)ticket.MinAge ?? DBNull.Value);
+        command.Parameters.AddWithValue("@MaxAge", (object?)ticket.MaxAge ?? DBNull.Value);
+        command.Parameters.AddWithValue("@Price", (object?)ticket.Price ?? DBNull.Value);
+        command.Parameters.AddWithValue("@CurrencyCode", ticket.CurrencyCode ?? "USD");
+        command.Parameters.AddWithValue("@SortOrder", ticket.SortOrder);
+        command.Parameters.AddWithValue("@CapacidadPorTipo", (object?)ticket.CapacidadPorTipo ?? DBNull.Value);
+        command.Parameters.AddWithValue("@VentaInicioUtc", (object?)ticket.VentaInicioUtc ?? DBNull.Value);
+        command.Parameters.AddWithValue("@VentaFinUtc", (object?)ticket.VentaFinUtc ?? DBNull.Value);
+        command.Parameters.AddWithValue("@MaxPorOrden", (object?)ticket.MaxPorOrden ?? DBNull.Value);
+        command.Parameters.AddWithValue("@MaxPorUsuario", (object?)ticket.MaxPorUsuario ?? DBNull.Value);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    await tx.CommitAsync(cancellationToken);
+}
+```
+
+<Warning>
+  This operation **deletes all existing ticket types** and recreates them. Do not call this method if you have active reservations without careful consideration.
+</Warning>
+
+## Marketplace Display
+
+Ticket types are fetched for marketplace display:
+
+```csharp
+public sealed record TourTicketTypeSummaryDto(
+    int TourId,
+    string Name,
+    decimal? Price,
+    string CurrencyCode,
+    int SortOrder,
+    DateTime? VentaInicioUtc = null,
+    DateTime? VentaFinUtc = null,
+    bool IsActive = true,
+    int? CapacidadPorTipo = null);
+```
+
+### Fetching Ticket Types for Tours
+
+The marketplace queries ticket types for all tours:
+
+```csharp
+private async Task<Dictionary<int, List<TourTicketTypeSummaryDto>>> GetTicketTypesForToursAsync(
+    IReadOnlyCollection<int> tourIds,
+    CancellationToken cancellationToken)
+{
+    var result = new Dictionary<int, List<TourTicketTypeSummaryDto>>();
+    if (tourIds is null || tourIds.Count == 0)
+        return result;
+
+    await using var conn = new SqlConnection(_connectionString);
+    await conn.OpenAsync(cancellationToken);
+
+    var parameterNames = tourIds.Select((_, index) => $"@p{index}").ToArray();
+    var sql = $@"
+SELECT TourId, Name, Price, CurrencyCode, SortOrder, VentaInicioUtc, VentaFinUtc, IsActive, CapacidadPorTipo
+FROM TourTicketType
+WHERE IsActive = 1 AND TourId IN ({string.Join(",", parameterNames)})
+ORDER BY TourId, SortOrder";
+
+    await using var cmd = new SqlCommand(sql, conn);
+    var idx = 0;
+    foreach (var tourId in tourIds)
+    {
+        cmd.Parameters.AddWithValue(parameterNames[idx], tourId);
+        idx++;
+    }
+
+    await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+    while (await reader.ReadAsync(cancellationToken))
+    {
+        var tourId = reader.GetInt32(reader.GetOrdinal("TourId"));
+        // ... build TourTicketTypeSummaryDto
+        
+        if (!result.TryGetValue(tourId, out var list))
+        {
+            list = new List<TourTicketTypeSummaryDto>();
+            result[tourId] = list;
+        }
+        list.Add(ticketTypeDto);
+    }
+
+    return result;
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Ticket Type Naming">
+    - Use clear, descriptive names: "Adult (18+)", "Child (3-12)"
+    - Include age ranges in the name for transparency
+    - Avoid ambiguous names like "Type A" or "Regular"
+    - Keep names under 25 characters for mobile display
+  </Accordion>
+
+  <Accordion title="Pricing Strategy">
+    - Set child tickets at 50-70% of adult price
+    - Offer senior discounts (10-20% off) for 65+
+    - Create group rates for bulk purchases (10+ people)
+    - Use early bird pricing to incentivize advance bookings
+    - Never set price to $0 unless it's truly free (can cause payment processing issues)
+  </Accordion>
+
+  <Accordion title="Capacity Planning">
+    - Set realistic capacity limits based on your tour vehicle/venue
+    - Leave 10-20% buffer for no-shows and cancellations
+    - Use per-type limits for tours with age/mobility restrictions
+    - Monitor capacity daily during peak season
+    - Update capacity in real-time as reservations come in
+  </Accordion>
+
+  <Accordion title="Age Restrictions">
+    - Be specific: MinAge = 3 (not 2.5 or "toddler")
+    - Consider legal drinking age if alcohol is included
+    - Set MaxAge for children's tickets to prevent adult abuse
+    - Leave MaxAge null for adult/senior tickets
+    - Document age verification requirements in tour FAQ
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Extras & Add-ons" icon="cart-plus" href="/hosts/extras-and-addons">
+    Boost revenue with optional extras
+  </Card>
+
+  <Card title="Pricing Strategies" icon="dollar-sign" href="/hosts/pricing">
+    Learn advanced pricing configurations
+  </Card>
+
+  <Card title="Dashboard" icon="chart-line" href="/hosts/dashboard">
+    Monitor ticket sales and capacity
+  </Card>
+
+  <Card title="Booking Management" icon="calendar-check" href="/hosts/managing-bookings">
+    View and manage customer reservations
+  </Card>
+</CardGroup>

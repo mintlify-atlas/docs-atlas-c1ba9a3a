@@ -1,0 +1,464 @@
+---
+title: 'PayPal Service API'
+description: 'PayPal payment integration for tour reservations'
+icon: 'credit-card'
+---
+
+## Overview
+
+The `PaypalService` provides integration with PayPal's checkout API for processing tour reservation payments. It handles OAuth2 authentication with PayPal and order creation.
+
+## Interface
+
+```csharp
+public interface IPaypalService
+```
+
+Location: `~/workspace/source/AndanDo/Services/Paypal/PaypalService.cs`
+
+---
+
+## Configuration
+
+The service requires PayPal configuration via `PaypalOptions`:
+
+```csharp
+public class PaypalOptions
+{
+    public string BaseUrl { get; set; }      // PayPal API base URL
+    public string ClientId { get; set; }     // PayPal client ID
+    public string ClientSecret { get; set; } // PayPal client secret
+}
+```
+
+<Info>
+  **Environment URLs**:
+  - Sandbox: `https://api-m.sandbox.paypal.com`
+  - Production: `https://api-m.paypal.com`
+</Info>
+
+<CodeGroup>
+```json appsettings.json
+{
+  "Paypal": {
+    "BaseUrl": "https://api-m.sandbox.paypal.com",
+    "ClientId": "your-client-id",
+    "ClientSecret": "your-client-secret"
+  }
+}
+```
+
+```csharp Program.cs Registration
+services.Configure<PaypalOptions>(configuration.GetSection("Paypal"));
+services.AddHttpClient<IPaypalService, PaypalService>();
+```
+</CodeGroup>
+
+---
+
+## Methods
+
+### CreateOrderAsync
+
+Creates a PayPal order for a tour reservation payment.
+
+```csharp
+Task<PaypalOrderResult?> CreateOrderAsync(
+    decimal amount,
+    string currency,
+    string returnUrl,
+    string cancelUrl)
+```
+
+<ParamField path="amount" type="decimal" required>
+  Payment amount (formatted to 2 decimal places)
+</ParamField>
+
+<ParamField path="currency" type="string" required>
+  Three-letter currency code (e.g., "USD", "EUR", "DOP")
+</ParamField>
+
+<ParamField path="returnUrl" type="string" required>
+  URL where PayPal redirects after successful payment approval
+</ParamField>
+
+<ParamField path="cancelUrl" type="string" required>
+  URL where PayPal redirects if user cancels the payment
+</ParamField>
+
+<ResponseField name="result" type="PaypalOrderResult?">
+  PayPal order result or null if creation failed
+  
+  <Expandable title="PaypalOrderResult properties">
+    - `OrderId` (string) - PayPal order ID
+    - `ApprovalUrl` (string?) - URL to redirect user for payment approval
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Basic Usage
+var result = await paypalService.CreateOrderAsync(
+    amount: 150.00m,
+    currency: "USD",
+    returnUrl: "https://yourdomain.com/payment/success",
+    cancelUrl: "https://yourdomain.com/payment/cancel"
+);
+
+if (result != null && result.ApprovalUrl != null)
+{
+    // Redirect user to PayPal for payment
+    navigationManager.NavigateTo(result.ApprovalUrl, forceLoad: true);
+}
+else
+{
+    Console.WriteLine("Failed to create PayPal order");
+}
+```
+
+```csharp With Reservation
+// Create tour reservation first
+var reservationId = await tourService.CreateReservationAsync(
+    reservationRequest,
+    ticketRequests
+);
+
+// Generate return URLs with reservation ID
+var returnUrl = $"https://yourdomain.com/payment/complete?reservationId={reservationId}";
+var cancelUrl = $"https://yourdomain.com/payment/cancel?reservationId={reservationId}";
+
+// Create PayPal order
+var paypalOrder = await paypalService.CreateOrderAsync(
+    amount: reservationRequest.TotalAmount,
+    currency: reservationRequest.CurrencyCode,
+    returnUrl: returnUrl,
+    cancelUrl: cancelUrl
+);
+
+if (paypalOrder != null)
+{
+    // Store order ID with reservation
+    await tourService.UpdateReservationPaymentStatusAsync(
+        reservationId: reservationId,
+        paymentStatus: 0, // Pending
+        paymentProvider: "PayPal",
+        paymentReference: paypalOrder.OrderId
+    );
+    
+    // Redirect to PayPal
+    navigationManager.NavigateTo(paypalOrder.ApprovalUrl!, forceLoad: true);
+}
+```
+</CodeGroup>
+
+---
+
+## Payment Flow
+
+The typical payment flow involves multiple steps:
+
+<Steps>
+  <Step title="Create Reservation">
+    Create a tour reservation with payment status = pending
+  </Step>
+  
+  <Step title="Create PayPal Order">
+    Call `CreateOrderAsync` with the reservation amount and return URLs
+  </Step>
+  
+  <Step title="Store Order Reference">
+    Save the PayPal order ID with the reservation
+  </Step>
+  
+  <Step title="Redirect to PayPal">
+    Redirect user to the approval URL for payment
+  </Step>
+  
+  <Step title="Handle Return">
+    User is redirected back to your return URL after approval or cancellation
+  </Step>
+  
+  <Step title="Capture Payment">
+    Call PayPal's capture API to complete the transaction (not implemented in this service)
+  </Step>
+  
+  <Step title="Update Status">
+    Update reservation payment status based on capture result
+  </Step>
+</Steps>
+
+---
+
+## Implementation Details
+
+### OAuth2 Authentication
+
+The service uses OAuth2 client credentials flow to authenticate with PayPal:
+
+```csharp
+private async Task<string?> AcquireAccessTokenAsync()
+{
+    // Base64 encode credentials
+    var creds = Convert.ToBase64String(
+        Encoding.UTF8.GetBytes($"{_options.ClientId}:{_options.ClientSecret}")
+    );
+    
+    // Request token
+    var request = new HttpRequestMessage(HttpMethod.Post, 
+        $"{_options.BaseUrl}/v1/oauth2/token");
+    request.Headers.Authorization = new AuthenticationHeaderValue("Basic", creds);
+    request.Content = new StringContent(
+        "grant_type=client_credentials",
+        Encoding.UTF8,
+        "application/x-www-form-urlencoded"
+    );
+    
+    // Parse response for access token
+    ...
+}
+```
+
+<Note>
+  The access token is acquired fresh for each order creation. For production use, consider implementing token caching with expiration handling.
+</Note>
+
+---
+
+### Order Creation Request
+
+The service creates a PayPal order with the following structure:
+
+```json
+{
+  "intent": "CAPTURE",
+  "purchase_units": [
+    {
+      "amount": {
+        "currency_code": "USD",
+        "value": "150.00"
+      }
+    }
+  ],
+  "application_context": {
+    "return_url": "https://yourdomain.com/payment/success",
+    "cancel_url": "https://yourdomain.com/payment/cancel"
+  }
+}
+```
+
+<Info>
+  **Intent**: The service uses `CAPTURE` intent, which means the payment is captured immediately upon user approval. For authorization-only flows, you would use `AUTHORIZE` intent.
+</Info>
+
+---
+
+## Error Handling
+
+<Warning>
+  The service returns `null` if any error occurs during:
+  - Token acquisition
+  - Order creation
+  - Network communication
+  
+  Always check for null results and handle appropriately.
+</Warning>
+
+<CodeGroup>
+```csharp Error Handling Example
+var paypalOrder = await paypalService.CreateOrderAsync(
+    amount: 150.00m,
+    currency: "USD",
+    returnUrl: returnUrl,
+    cancelUrl: cancelUrl
+);
+
+if (paypalOrder == null)
+{
+    // Log error
+    logger.LogError("Failed to create PayPal order for reservation {ReservationId}", 
+        reservationId);
+    
+    // Update reservation with error status
+    await tourService.UpdateReservationPaymentStatusAsync(
+        reservationId: reservationId,
+        paymentStatus: 2, // Failed
+        paymentProvider: null,
+        paymentReference: null
+    );
+    
+    // Show error to user
+    return "Payment service unavailable. Please try again.";  
+}
+
+if (string.IsNullOrEmpty(paypalOrder.ApprovalUrl))
+{
+    logger.LogError("PayPal order created but no approval URL returned");
+    return "Payment configuration error. Please contact support.";
+}
+
+// Success - proceed with redirect
+navigationManager.NavigateTo(paypalOrder.ApprovalUrl, forceLoad: true);
+```
+</CodeGroup>
+
+---
+
+## Currency Support
+
+PayPal supports a wide range of currencies. Common currencies for tour marketplace:
+
+- **USD** - US Dollar
+- **EUR** - Euro
+- **GBP** - British Pound
+- **CAD** - Canadian Dollar
+- **AUD** - Australian Dollar
+- **MXN** - Mexican Peso
+
+<Info>
+  The Dominican Peso (DOP) is not directly supported by PayPal. For DOP transactions, consider:
+  - Converting to USD before creating the order
+  - Using a local payment provider
+  - Offering dual pricing (DOP and USD)
+</Info>
+
+---
+
+## Complete Payment Example
+
+Here's a complete Blazor component example:
+
+<CodeGroup>
+```csharp PaymentHandler.razor.cs
+public class PaymentHandlerModel : ComponentBase
+{
+    [Inject] private IPaypalService PaypalService { get; set; } = default!;
+    [Inject] private ITourService TourService { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+    [Inject] private ILogger<PaymentHandlerModel> Logger { get; set; } = default!;
+    
+    public async Task<bool> ProcessPaymentAsync(
+        TourReservationRequest reservation,
+        IEnumerable<TourReservationTicketRequest> tickets)
+    {
+        try
+        {
+            // 1. Create reservation
+            var reservationId = await TourService.CreateReservationAsync(
+                reservation,
+                tickets
+            );
+            
+            Logger.LogInformation(
+                "Created reservation {ReservationId} for ${Amount}",
+                reservationId,
+                reservation.TotalAmount
+            );
+            
+            // 2. Build return URLs
+            var baseUrl = Navigation.BaseUri.TrimEnd('/');
+            var returnUrl = $"{baseUrl}/payment/success?reservationId={reservationId}";
+            var cancelUrl = $"{baseUrl}/payment/cancel?reservationId={reservationId}";
+            
+            // 3. Create PayPal order
+            var paypalOrder = await PaypalService.CreateOrderAsync(
+                amount: reservation.TotalAmount,
+                currency: reservation.CurrencyCode,
+                returnUrl: returnUrl,
+                cancelUrl: cancelUrl
+            );
+            
+            if (paypalOrder == null || string.IsNullOrEmpty(paypalOrder.ApprovalUrl))
+            {
+                Logger.LogError("Failed to create PayPal order");
+                return false;
+            }
+            
+            // 4. Update reservation with payment reference
+            await TourService.UpdateReservationPaymentStatusAsync(
+                reservationId: reservationId,
+                paymentStatus: 0, // Pending
+                paymentProvider: "PayPal",
+                paymentReference: paypalOrder.OrderId
+            );
+            
+            Logger.LogInformation(
+                "PayPal order {OrderId} created for reservation {ReservationId}",
+                paypalOrder.OrderId,
+                reservationId
+            );
+            
+            // 5. Redirect to PayPal
+            Navigation.NavigateTo(paypalOrder.ApprovalUrl, forceLoad: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error processing payment");
+            return false;
+        }
+    }
+}
+```
+</CodeGroup>
+
+---
+
+## Testing
+
+<Tabs>
+  <Tab title="Sandbox Testing">
+    Use PayPal sandbox for development:
+    
+    1. Create sandbox accounts at [PayPal Developer Dashboard](https://developer.paypal.com)
+    2. Use sandbox credentials in configuration
+    3. Test with sandbox personal/business accounts
+    4. Verify transactions in sandbox dashboard
+    
+    **Sandbox URL**: `https://api-m.sandbox.paypal.com`
+  </Tab>
+  
+  <Tab title="Production">
+    For production deployment:
+    
+    1. Create production app credentials
+    2. Update configuration with production URL and credentials
+    3. Implement webhook handling for payment notifications
+    4. Add proper error logging and monitoring
+    5. Test with small real transactions first
+    
+    **Production URL**: `https://api-m.paypal.com`
+  </Tab>
+</Tabs>
+
+---
+
+## Security Considerations
+
+<Warning>
+  **Credential Protection**:
+  - Never commit credentials to source control
+  - Use Azure Key Vault, AWS Secrets Manager, or similar for production
+  - Rotate credentials regularly
+  - Use different credentials for sandbox and production
+</Warning>
+
+<Note>
+  **HTTPS Required**: PayPal requires HTTPS for all return URLs in production. Ensure your application uses SSL certificates.
+</Note>
+
+<Info>
+  **Webhook Verification**: For production, implement webhook handlers to receive payment status updates from PayPal. This service only handles order creation - capturing and webhook handling should be implemented separately.
+</Info>
+
+---
+
+## Next Steps
+
+To complete PayPal integration, you'll need to implement:
+
+1. **Order Capture**: Call PayPal's capture endpoint after user approval
+2. **Webhook Handler**: Receive and process payment notifications
+3. **Refund Support**: Handle refund requests
+4. **Order Inquiry**: Query PayPal for order status
+5. **Error Recovery**: Handle failed captures and timeouts
+
+Refer to [PayPal's API documentation](https://developer.paypal.com/docs/api/orders/v2/) for implementation details.

@@ -1,0 +1,527 @@
+---
+title: 'PayPal Configuration'
+description: 'PayPal payment gateway integration and configuration'
+icon: 'paypal'
+---
+
+## Overview
+
+AndanDo integrates with PayPal for processing tour bookings and payments. The PayPal configuration supports both sandbox (testing) and live production environments.
+
+<Info>
+PayPal integration uses the REST API for creating orders, capturing payments, and managing transactions.
+</Info>
+
+## Configuration
+
+PayPal settings are configured in the `PayPal` section of `appsettings.json`:
+
+```json appsettings.json
+{
+  "PayPal": {
+    "Mode": "sandbox",
+    "ClientId": "your-paypal-client-id",
+    "ClientSecret": "your-paypal-client-secret",
+    "BaseUrl": "https://api-m.sandbox.paypal.com"
+  }
+}
+```
+
+## Configuration Properties
+
+### Mode
+
+The PayPal environment mode.
+
+```json
+"Mode": "sandbox"
+```
+
+- **Type**: `string`
+- **Required**: No
+- **Default**: `"sandbox"` (defined in `PaypalOptions.cs:5`)
+- **Values**: `"sandbox"` or `"live"`
+
+<Warning>
+**Always use `"sandbox"` for development and testing**. Only switch to `"live"` in production with real credentials.
+</Warning>
+
+### ClientId
+
+Your PayPal application's Client ID.
+
+```json
+"ClientId": "Ab76A0qILXO-h6926is0lH2xuGAPMB_ZglqXBhNY..."
+```
+
+- **Type**: `string`
+- **Required**: Yes
+- **Format**: Long alphanumeric string
+- **Location**: Found in PayPal Developer Dashboard
+
+### ClientSecret
+
+Your PayPal application's Client Secret.
+
+```json
+"ClientSecret": "EM-X5J8ka4gstL8McLxh69ZRZFY_QWrNmFyIyorv..."
+```
+
+- **Type**: `string`
+- **Required**: Yes
+- **Format**: Long alphanumeric string
+- **Security**: Keep confidential, never commit to source control
+
+<Warning>
+**Critical Security**: The Client Secret is highly sensitive. Never:
+- Commit it to source control
+- Share it in public forums or logs
+- Expose it to client-side code
+- Use production credentials in development
+
+Use User Secrets, environment variables, or Azure Key Vault.
+</Warning>
+
+### BaseUrl
+
+The PayPal API base URL.
+
+```json
+"BaseUrl": "https://api-m.sandbox.paypal.com"
+```
+
+- **Type**: `string`
+- **Required**: No
+- **Default**: `"https://api-m.sandbox.paypal.com"` (defined in `PaypalOptions.cs:8`)
+- **Sandbox**: `https://api-m.sandbox.paypal.com`
+- **Live**: `https://api-m.paypal.com`
+
+<Note>
+The `BaseUrl` should automatically change based on `Mode`, but can be explicitly set if needed.
+</Note>
+
+## PaypalOptions Class
+
+The configuration is bound to the `PaypalOptions` class:
+
+```csharp Services/Paypal/PaypalOptions.cs
+public class PaypalOptions
+{
+    public string Mode { get; set; } = "sandbox";
+    public string ClientId { get; set; } = string.Empty;
+    public string ClientSecret { get; set; } = string.Empty;
+    public string BaseUrl { get; set; } = "https://api-m.sandbox.paypal.com";
+}
+```
+
+## Service Registration
+
+The PayPal service is registered in `Program.cs`:
+
+```csharp Program.cs
+// Bind PayPal configuration
+builder.Services.Configure<PaypalOptions>(builder.Configuration.GetSection("PayPal"));
+
+// Register PayPal service with HttpClient
+builder.Services.AddHttpClient<IPaypalService, PaypalService>();
+```
+
+<Info>
+`AddHttpClient` automatically configures an `HttpClient` instance for the `PaypalService`, enabling efficient HTTP connection pooling.
+</Info>
+
+## Environment-Specific Configuration
+
+<CodeGroup>
+```json Development (Sandbox)
+{
+  "PayPal": {
+    "Mode": "sandbox",
+    "ClientId": "your-sandbox-client-id",
+    "ClientSecret": "your-sandbox-client-secret",
+    "BaseUrl": "https://api-m.sandbox.paypal.com"
+  }
+}
+```
+
+```json Production (Live)
+{
+  "PayPal": {
+    "Mode": "live",
+    "ClientId": "your-live-client-id",
+    "ClientSecret": "your-live-client-secret",
+    "BaseUrl": "https://api-m.paypal.com"
+  }
+}
+```
+</CodeGroup>
+
+## Getting PayPal Credentials
+
+<Accordion title="Create a PayPal Developer Account">
+1. Go to [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/)
+2. Sign in with your PayPal account (or create one)
+3. Click **Apps & Credentials**
+4. Select **Sandbox** for testing or **Live** for production
+5. Click **Create App**
+6. Enter your app name (e.g., "AndanDo")
+7. Select your sandbox business account
+8. Click **Create App**
+9. Copy the **Client ID** and **Secret** from the app details page
+
+<Note>
+Sandbox credentials are separate from live credentials. You'll need to create apps in both environments.
+</Note>
+</Accordion>
+
+<Accordion title="Sandbox Testing Accounts">
+PayPal provides test accounts for sandbox testing:
+
+1. Go to **Sandbox** → **Accounts** in the Developer Dashboard
+2. PayPal creates default personal and business test accounts
+3. Use these accounts to test payments without real money
+4. Click **View/Edit account** to see login credentials
+
+**Default Test Credit Cards**:
+- Visa: `4032039861089129`
+- Mastercard: `5497803644557597`
+- Amex: `379402515662075`
+- Expiry: Any future date
+- CVV: Any 3-4 digits
+</Accordion>
+
+## Storing Credentials Securely
+
+<Accordion title="Development (User Secrets)">
+Use User Secrets for local development:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "PayPal:Mode" "sandbox"
+dotnet user-secrets set "PayPal:ClientId" "your-sandbox-client-id"
+dotnet user-secrets set "PayPal:ClientSecret" "your-sandbox-client-secret"
+dotnet user-secrets set "PayPal:BaseUrl" "https://api-m.sandbox.paypal.com"
+```
+
+Verify:
+```bash
+dotnet user-secrets list
+```
+</Accordion>
+
+<Accordion title="Production (Environment Variables)">
+Use environment variables in production:
+
+```bash
+export PayPal__Mode="live"
+export PayPal__ClientId="your-live-client-id"
+export PayPal__ClientSecret="your-live-client-secret"
+export PayPal__BaseUrl="https://api-m.paypal.com"
+```
+
+Or in `appsettings.Production.json` (without the secret):
+```json
+{
+  "PayPal": {
+    "Mode": "live",
+    "BaseUrl": "https://api-m.paypal.com"
+  }
+}
+```
+
+<Warning>
+Never put `ClientSecret` in `appsettings.Production.json`. Always use environment variables or Azure Key Vault.
+</Warning>
+</Accordion>
+
+<Accordion title="Azure App Service / Key Vault">
+Store PayPal secrets in Azure Key Vault:
+
+```bash
+# Add secrets to Key Vault
+az keyvault secret set \
+  --vault-name "your-keyvault" \
+  --name "PayPalClientId" \
+  --value "your-live-client-id"
+
+az keyvault secret set \
+  --vault-name "your-keyvault" \
+  --name "PayPalClientSecret" \
+  --value "your-live-client-secret"
+```
+
+Reference in App Service Application Settings:
+```text
+PayPal__ClientId=@Microsoft.KeyVault(SecretUri=https://your-keyvault.vault.azure.net/secrets/PayPalClientId/)
+PayPal__ClientSecret=@Microsoft.KeyVault(SecretUri=https://your-keyvault.vault.azure.net/secrets/PayPalClientSecret/)
+PayPal__Mode=live
+PayPal__BaseUrl=https://api-m.paypal.com
+```
+</Accordion>
+
+## PayPal API Integration
+
+Typical PayPal payment flow in AndanDo:
+
+```csharp
+public class PaypalService : IPaypalService
+{
+    private readonly HttpClient _httpClient;
+    private readonly PaypalOptions _options;
+
+    public PaypalService(HttpClient httpClient, IOptions<PaypalOptions> options)
+    {
+        _httpClient = httpClient;
+        _options = options.Value;
+    }
+
+    // 1. Get OAuth access token
+    public async Task<string> GetAccessTokenAsync()
+    {
+        var auth = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes($"{_options.ClientId}:{_options.ClientSecret}")
+        );
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{_options.BaseUrl}/v1/oauth2/token")
+        {
+            Headers = { { "Authorization", $"Basic {auth}" } },
+            Content = new FormUrlEncodedContent(new[] {
+                new KeyValuePair<string, string>("grant_type", "client_credentials")
+            })
+        };
+
+        var response = await _httpClient.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+        var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(json);
+        return tokenResponse.AccessToken;
+    }
+
+    // 2. Create order
+    public async Task<string> CreateOrderAsync(decimal amount, string currency = "USD")
+    {
+        var token = await GetAccessTokenAsync();
+        
+        var orderRequest = new
+        {
+            intent = "CAPTURE",
+            purchase_units = new[]
+            {
+                new
+                {
+                    amount = new
+                    {
+                        currency_code = currency,
+                        value = amount.ToString("F2")
+                    }
+                }
+            }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{_options.BaseUrl}/v2/checkout/orders")
+        {
+            Headers = { { "Authorization", $"Bearer {token}" } },
+            Content = new StringContent(
+                JsonSerializer.Serialize(orderRequest),
+                Encoding.UTF8,
+                "application/json"
+            )
+        };
+
+        var response = await _httpClient.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+        var order = JsonSerializer.Deserialize<PayPalOrder>(json);
+        return order.Id;
+    }
+
+    // 3. Capture payment
+    public async Task<bool> CaptureOrderAsync(string orderId)
+    {
+        var token = await GetAccessTokenAsync();
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{_options.BaseUrl}/v2/checkout/orders/{orderId}/capture"
+        )
+        {
+            Headers = { { "Authorization", $"Bearer {token}" } }
+        };
+
+        var response = await _httpClient.SendAsync(request);
+        return response.IsSuccessStatusCode;
+    }
+}
+```
+
+## Testing PayPal Integration
+
+<Accordion title="Unit Testing with Mock Configuration">
+```csharp
+[Test]
+public void PaypalOptions_LoadsFromConfiguration()
+{
+    // Arrange
+    var configuration = new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string>
+        {
+            { "PayPal:Mode", "sandbox" },
+            { "PayPal:ClientId", "test-client-id" },
+            { "PayPal:ClientSecret", "test-secret" },
+            { "PayPal:BaseUrl", "https://api-m.sandbox.paypal.com" }
+        })
+        .Build();
+
+    var options = new PaypalOptions();
+    configuration.GetSection("PayPal").Bind(options);
+
+    // Assert
+    Assert.AreEqual("sandbox", options.Mode);
+    Assert.AreEqual("test-client-id", options.ClientId);
+    Assert.AreEqual("test-secret", options.ClientSecret);
+    Assert.AreEqual("https://api-m.sandbox.paypal.com", options.BaseUrl);
+}
+```
+</Accordion>
+
+<Accordion title="Integration Testing with Sandbox">
+```csharp
+[Test]
+public async Task CreateOrder_WithValidCredentials_ReturnsOrderId()
+{
+    // Arrange
+    var httpClient = new HttpClient();
+    var options = Options.Create(new PaypalOptions
+    {
+        Mode = "sandbox",
+        ClientId = "your-sandbox-client-id",
+        ClientSecret = "your-sandbox-secret",
+        BaseUrl = "https://api-m.sandbox.paypal.com"
+    });
+    var service = new PaypalService(httpClient, options);
+
+    // Act
+    var orderId = await service.CreateOrderAsync(100.00m, "USD");
+
+    // Assert
+    Assert.IsNotNull(orderId);
+    Assert.IsNotEmpty(orderId);
+}
+```
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Authentication failed">
+**Error**: `401 Unauthorized` when calling PayPal API
+
+**Cause**: Invalid `ClientId` or `ClientSecret`.
+
+**Solutions**:
+1. Verify credentials are copied correctly from PayPal Dashboard
+2. Ensure you're using sandbox credentials with sandbox URLs
+3. Check that credentials haven't expired or been revoked
+4. Verify the credentials match the environment (sandbox vs live)
+</Accordion>
+
+<Accordion title="Invalid request">
+**Error**: `400 Bad Request` or `422 Unprocessable Entity`
+
+**Solutions**:
+1. Verify request payload format matches PayPal API documentation
+2. Check amount format (must be string with 2 decimal places)
+3. Ensure currency code is valid (USD, EUR, etc.)
+4. Validate all required fields are present
+5. Check PayPal API version compatibility
+</Accordion>
+
+<Accordion title="Configuration not loading">
+**Error**: Options are empty or have default values
+
+**Solutions**:
+1. Verify `appsettings.json` contains the `PayPal` section
+2. Check `Program.cs` includes the configuration binding
+3. Ensure JSON syntax is valid (no trailing commas)
+4. Verify environment-specific files are properly named
+5. Check environment variables format: `PayPal__ClientId` (double underscore)
+</Accordion>
+
+<Accordion title="HTTPS certificate errors">
+**Error**: SSL/TLS certificate validation failures
+
+**Solutions**:
+1. Ensure you're using HTTPS URLs, not HTTP
+2. Update .NET runtime to latest version
+3. Verify system time is correct (affects certificate validation)
+4. Check corporate proxy/firewall isn't intercepting HTTPS
+</Accordion>
+
+## PayPal Webhooks
+
+To receive payment notifications, configure webhooks in PayPal Dashboard:
+
+1. Go to **Apps & Credentials** → Your App → **Webhooks**
+2. Click **Add Webhook**
+3. Enter your webhook URL: `https://yourdomain.com/api/webhooks/paypal`
+4. Select event types to subscribe to:
+   - `PAYMENT.CAPTURE.COMPLETED`
+   - `PAYMENT.CAPTURE.DENIED`
+   - `CHECKOUT.ORDER.APPROVED`
+5. Click **Save**
+
+<Note>
+Webhooks require your application to be publicly accessible. Use ngrok or similar for local testing.
+</Note>
+
+## Going Live Checklist
+
+<Warning>
+**Before switching to live mode**:
+
+- [ ] Test all payment flows thoroughly in sandbox
+- [ ] Create a live PayPal app in the Developer Dashboard
+- [ ] Get live credentials (Client ID and Secret)
+- [ ] Store live credentials securely (Key Vault, not config files)
+- [ ] Update configuration to use `"Mode": "live"`
+- [ ] Update `BaseUrl` to `https://api-m.paypal.com`
+- [ ] Configure webhooks with production URLs
+- [ ] Test with small real payments first
+- [ ] Set up monitoring and error alerting
+- [ ] Review PayPal's acceptable use policies
+- [ ] Ensure PCI compliance if storing card data
+- [ ] Configure proper error handling and logging
+</Warning>
+
+## Security Best Practices
+
+<Warning>
+**PayPal Security Checklist**:
+
+- Never expose Client Secret to client-side code or logs
+- Use HTTPS for all PayPal API calls
+- Validate webhook signatures to prevent spoofing
+- Store credentials in secure vaults (Azure Key Vault, AWS Secrets Manager)
+- Rotate credentials periodically
+- Implement proper error handling without exposing sensitive details
+- Log payment transactions for audit trail
+- Use different credentials for each environment
+- Monitor for suspicious payment patterns
+- Implement rate limiting to prevent abuse
+</Warning>
+
+<Tip>
+**Payment Best Practices**:
+
+- Always capture payments server-side, never client-side
+- Implement idempotency keys to prevent duplicate charges
+- Store order IDs and transaction IDs in your database
+- Send email confirmations for successful payments
+- Implement refund functionality for customer service
+- Monitor webhook events for payment updates
+- Handle failed payments gracefully with retry logic
+- Display clear error messages to users
+</Tip>
+
+## Related Pages
+
+- [appsettings.json Overview](/configuration/appsettings)
+- [Payment Processing](/services/payments)
+- [Booking Management](/services/bookings)

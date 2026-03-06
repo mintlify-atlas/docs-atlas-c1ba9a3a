@@ -1,0 +1,592 @@
+---
+title: Installation
+description: Complete installation and configuration guide for AndanDo
+---
+
+## Prerequisites
+
+Before installing AndanDo, ensure you have the following requirements:
+
+<CardGroup cols={2}>
+  <Card title="Required Software" icon="download">
+    - **.NET SDK 10.0** (or 8.0+)
+    - **SQL Server** 2019+ or SQL Express
+    - **Git** for source control
+    - **Visual Studio 2022+** or VS Code
+  </Card>
+  <Card title="External Services" icon="cloud">
+    - Internet connection (for Nominatim geolocation)
+    - **PayPal Developer Account** (optional, for payments)
+    - **Google Maps API Key** (optional, for maps)
+    - **SMTP Server** (optional, for emails)
+  </Card>
+</CardGroup>
+
+<Note>
+  If you don't have .NET 10 SDK, you can use .NET 8.0 by changing `TargetFramework` in `AndanDo.csproj` to `net8.0`.
+</Note>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Download the Source Code">
+    Clone or download the AndanDo repository:
+    
+    ```bash
+    git clone <repository-url>
+    cd AndanDo
+    ```
+  </Step>
+
+  <Step title="Install .NET SDK">
+    Download and install the .NET SDK from [dotnet.microsoft.com](https://dotnet.microsoft.com/download).
+    
+    Verify installation:
+    ```bash
+    dotnet --version
+    ```
+    
+    Expected output: `10.0.x` or `8.0.x`
+  </Step>
+
+  <Step title="Set Up SQL Server">
+    Install SQL Server and create the database:
+    
+    ```sql
+    CREATE DATABASE AndandoDB;
+    GO
+    
+    -- Create a user for the application
+    CREATE LOGIN andando_user WITH PASSWORD = 'YourSecurePassword123!';
+    GO
+    
+    USE AndandoDB;
+    GO
+    
+    CREATE USER andando_user FOR LOGIN andando_user;
+    ALTER ROLE db_owner ADD MEMBER andando_user;
+    GO
+    ```
+    
+    <Warning>
+      In production, use a dedicated user with minimal required permissions instead of `db_owner`.
+    </Warning>
+  </Step>
+
+  <Step title="Run Database Migrations">
+    Execute the database schema scripts to create all required tables and stored procedures:
+    
+    ```sql
+    -- Core tables: Usuarios, Roles, UsuarioRoles
+    -- Tour tables: Tours, TourHeroInfo, TourInclusions, TourItinerary, TourFaq
+    -- Ticket tables: TourTicketTypes, TourExtras, TourExtraTicketPrices
+    -- Reservation tables: TourReservations, TourReservationTickets
+    -- Utility tables: PostLikes, Reviews, Settings
+    ```
+    
+    <Tip>
+      Check the `Database` folder in the repository for complete SQL scripts.
+    </Tip>
+  </Step>
+
+  <Step title="Configure Application Settings">
+    Navigate to the project directory and configure `appsettings.json`:
+    
+    ```bash
+    cd AndanDo/
+    ```
+    
+    See the [Configuration](#configuration) section below for detailed settings.
+  </Step>
+
+  <Step title="Restore NuGet Packages">
+    Install all dependencies:
+    
+    ```bash
+    dotnet restore
+    ```
+    
+    This installs:
+    - **Microsoft.Data.SqlClient** v6.1.3
+    - **System.IdentityModel.Tokens.Jwt** v8.14.0
+    - **MailKit** v4.14.1
+    - **System.Drawing.Common** v8.0.7
+  </Step>
+
+  <Step title="Build the Project">
+    Compile the application:
+    
+    ```bash
+    dotnet build
+    ```
+    
+    Verify no build errors occur.
+  </Step>
+
+  <Step title="Run the Application">
+    Start the development server:
+    
+    ```bash
+    dotnet run
+    ```
+    
+    Or for production:
+    ```bash
+    dotnet run --configuration Release
+    ```
+  </Step>
+</Steps>
+
+## Configuration
+
+### Database Connection
+
+Configure the SQL Server connection in `appsettings.json`:
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=AndandoDB;User Id=andando_user;Password=YourSecurePassword123!;TrustServerCertificate=true;"
+  }
+}
+```
+
+<Info>
+  For Azure SQL Database, use: `Server=tcp:yourserver.database.windows.net,1433;Initial Catalog=AndandoDB;User ID=youruser;Password=yourpass;Encrypt=True;`
+</Info>
+
+### JWT Authentication
+
+Configure JWT settings for secure authentication:
+
+```json appsettings.json
+{
+  "Jwt": {
+    "Issuer": "AndanDo",
+    "Audience": "AndanDo",
+    "SecretKey": "c0d3x-andando-production-secret-key-must-be-min-32-chars",
+    "ExpirationMinutes": 120
+  }
+}
+```
+
+<Warning>
+  **Security Critical**: Change the `SecretKey` to a strong, randomly generated value. Never use the example key in production!
+</Warning>
+
+<CodeGroup>
+```bash Generate Secret Key (Linux/Mac)
+openssl rand -base64 32
+```
+
+```powershell Generate Secret Key (Windows)
+[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
+```
+</CodeGroup>
+
+### SMTP Email Configuration
+
+Configure email service for notifications and password resets:
+
+```json appsettings.json
+{
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@gmail.com",
+    "Password": "your-app-specific-password",
+    "FromEmail": "noreply@yourdomain.com",
+    "FromName": "AndanDo"
+  }
+}
+```
+
+<Tip>
+  For Gmail, use an [App Password](https://support.google.com/accounts/answer/185833) instead of your regular password.
+</Tip>
+
+### PayPal Integration
+
+Configure PayPal for payment processing:
+
+```json appsettings.json
+{
+  "PayPal": {
+    "Mode": "sandbox",
+    "ClientId": "your-paypal-client-id",
+    "ClientSecret": "your-paypal-client-secret",
+    "BaseUrl": "https://api-m.sandbox.paypal.com"
+  }
+}
+```
+
+<Steps>
+  <Step title="Create PayPal Developer Account">
+    Visit [developer.paypal.com](https://developer.paypal.com) and create a developer account.
+  </Step>
+  <Step title="Create App Credentials">
+    Create a new app in the PayPal Developer Dashboard to get `ClientId` and `ClientSecret`.
+  </Step>
+  <Step title="Configure for Production">
+    For production, change:
+    - `Mode` to `"live"`
+    - `BaseUrl` to `"https://api-m.paypal.com"`
+    - Use production credentials
+  </Step>
+</Steps>
+
+### Environment-Specific Configuration
+
+Create `appsettings.Development.json` for local development:
+
+```json appsettings.Development.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=AndandoDB_Dev;User Id=dev_user;Password=dev_pass;TrustServerCertificate=true;"
+  }
+}
+```
+
+<Note>
+  `appsettings.Development.json` overrides settings from `appsettings.json` when running in Development mode.
+</Note>
+
+## Project Structure
+
+Understanding the AndanDo project structure:
+
+```
+AndanDo/
+├── Components/
+│   ├── Pages/
+│   │   ├── Home.razor              # Landing page
+│   │   ├── Marketplace.razor       # Tour marketplace
+│   │   ├── SearchResults.razor     # Search results
+│   │   ├── TourDetails.razor       # Tour detail view
+│   │   ├── Login_Account.razor     # User login
+│   │   ├── Register_Account.razor  # User registration
+│   │   ├── Invoice.razor           # Invoice generation
+│   │   └── Dashboard/
+│   │       ├── Index.razor         # Dashboard home
+│   │       ├── MyBookings.razor    # User reservations
+│   │       ├── MyProfile.razor     # User profile
+│   │       └── Settings.razor      # User settings
+│   └── Shared/
+│       ├── Searchbar.razor         # Search component
+│       ├── NavMenu.razor           # Navigation
+│       └── ValidateLogin.razor     # Auth guard
+├── Services/
+│   ├── Auth/
+│   │   ├── AuthService.cs          # Authentication logic
+│   │   ├── UserSession.cs          # Session management
+│   │   └── PasswordResetService.cs # Password recovery
+│   ├── Tour/
+│   │   └── TourService.cs          # Tour management
+│   ├── Paypal/
+│   │   ├── PaypalService.cs        # PayPal integration
+│   │   └── PaypalOptions.cs        # PayPal config
+│   ├── Email/
+│   │   ├── EmailService.cs         # Email sending
+│   │   └── SmtpOptions.cs          # SMTP config
+│   ├── JWT/
+│   │   └── JwtTokenService.cs      # JWT tokens
+│   └── Utility/
+│       ├── PostLikeService.cs      # Likes system
+│       ├── ReviewService.cs        # Reviews
+│       ├── CurrencyConversionService.cs
+│       └── AssistanceTextService.cs
+├── Dtos/
+│   ├── TourDtos.cs                 # Tour DTOs
+│   ├── AuthDtos.cs                 # Auth DTOs
+│   └── SearchFilterDto.cs          # Search DTOs
+├── wwwroot/
+│   ├── uploads/                    # Uploaded images
+│   └── template/
+│       └── Factura_Template.html   # Invoice template
+├── Program.cs                      # Application entry point
+├── appsettings.json               # Configuration
+└── AndanDo.csproj                 # Project file
+```
+
+## Service Registration
+
+AndanDo services are registered in `Program.cs`:
+
+```csharp Program.cs
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Blazor Server components
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+// Register application services
+builder.Services.AddScoped<ITourService, TourService>();
+builder.Services.AddScoped<TourService>();
+
+// JWT configuration
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+// Authentication services
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
+builder.Services.AddScoped<UserSession>();
+
+// Email services
+builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IMailService, MailService>();
+builder.Services.AddSingleton<MailNotificationDispatcher>();
+
+// PayPal integration
+builder.Services.Configure<PaypalOptions>(builder.Configuration.GetSection("PayPal"));
+builder.Services.AddHttpClient<IPaypalService, PaypalService>();
+
+// Protected browser storage
+builder.Services.AddScoped<ProtectedLocalStorage>();
+
+// Utility services
+builder.Services.AddHttpClient<IAssistanceTextService, AssistanceTextService>();
+builder.Services.AddScoped<ICurrencyConversionService, CurrencyConversionService>();
+builder.Services.AddScoped<IPostLikeService, PostLikeService>();
+builder.Services.AddScoped<IReviewService, ReviewService>();
+
+// Authentication & authorization
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie();
+builder.Services.AddCascadingAuthenticationState();
+```
+
+## Data Models
+
+### Core DTOs
+
+<CodeGroup>
+```csharp Tour Registration
+public record TourRegistrationRequest(
+    string OwnerUserId,
+    string Title,
+    string LocationLabel,
+    string ShortDescription,
+    string DescriptionHtml,
+    string ImageList,
+    bool IsActive,
+    bool MuestraInstantanea,
+    bool IsQuote,
+    bool IsNoPayment,
+    decimal? QuoteDepositPercent,
+    int? QuoteDueDays,
+    DateTime? CreatedAt,
+    DateTime? UpdatedAt);
+```
+
+```csharp Ticket Type
+public record TourTicketTypeRequest(
+    string Name,
+    int? MinAge,
+    int? MaxAge,
+    decimal? Price,
+    string CurrencyCode,
+    int SortOrder,
+    int? CapacidadPorTipo,
+    DateTime? VentaInicioUtc,
+    DateTime? VentaFinUtc,
+    int? MaxPorOrden,
+    int? MaxPorUsuario);
+```
+
+```csharp Authentication
+public record LoginRequest(string Email, string Password);
+
+public record RegisterRequest(
+    string Email,
+    string Password,
+    string Nombre,
+    string? Apellido,
+    string? Telefono,
+    string? Pais,
+    string? Ciudad,
+    string? FotoPerfilUrl);
+
+public record AuthResult(
+    int UserId,
+    string Email,
+    string Token,
+    string Nombre,
+    string Apellido,
+    string? Telefono,
+    string? FotoPerfilUrl);
+```
+</CodeGroup>
+
+## Security Considerations
+
+<CardGroup cols={2}>
+  <Card title="Password Hashing" icon="lock">
+    PBKDF2 with SHA256, 100,000 iterations, 16-byte salt, 32-byte key
+  </Card>
+  <Card title="JWT Tokens" icon="key">
+    Configurable expiration, secure secret key, issued and audience claims
+  </Card>
+  <Card title="SQL Injection Prevention" icon="shield">
+    Parameterized queries and stored procedures throughout
+  </Card>
+  <Card title="HTTPS Enforcement" icon="globe">
+    HSTS enabled, HTTPS redirection in production
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Before deploying to production:**
+  - Replace all example credentials and API keys
+  - Use environment variables for sensitive data
+  - Enable HTTPS and HSTS
+  - Configure proper CORS policies
+  - Set up database backups
+  - Review and restrict database user permissions
+</Warning>
+
+## Running in Production
+
+### Build for Production
+
+```bash
+dotnet publish -c Release -o ./publish
+```
+
+### Run as a Service
+
+<CodeGroup>
+```bash Linux (systemd)
+# Create service file: /etc/systemd/system/andando.service
+[Unit]
+Description=AndanDo Tour Marketplace
+
+[Service]
+WorkingDirectory=/var/www/andando
+ExecStart=/usr/bin/dotnet /var/www/andando/AndanDo.dll
+Restart=always
+RestartSec=10
+User=www-data
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
+
+# Enable and start
+sudo systemctl enable andando
+sudo systemctl start andando
+```
+
+```powershell Windows (IIS)
+# Install IIS and ASP.NET Core Hosting Bundle
+# Create IIS site pointing to publish folder
+# Configure application pool for "No Managed Code"
+
+Import-Module IISAdministration
+New-IISSite -Name "AndanDo" -PhysicalPath "C:\inetpub\andando" -BindingInformation "*:80:"
+```
+</CodeGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection fails">
+    **Symptoms**: Cannot connect to SQL Server
+    
+    **Solutions**:
+    1. Verify SQL Server is running: `services.msc` (Windows) or `systemctl status mssql-server` (Linux)
+    2. Test connection with SQL Server Management Studio or Azure Data Studio
+    3. Check firewall allows port 1433
+    4. Verify connection string format
+    5. Ensure user has proper permissions
+  </Accordion>
+
+  <Accordion title="JWT authentication errors">
+    **Symptoms**: Users cannot log in, token validation fails
+    
+    **Solutions**:
+    1. Ensure `SecretKey` is at least 32 characters
+    2. Verify `Issuer` and `Audience` match in configuration
+    3. Check token expiration time is reasonable
+    4. Clear browser storage and try again
+  </Accordion>
+
+  <Accordion title="PayPal integration not working">
+    **Symptoms**: Payment creation fails, orders cannot be captured
+    
+    **Solutions**:
+    1. Verify `ClientId` and `ClientSecret` are correct
+    2. Check `BaseUrl` matches your mode (sandbox vs live)
+    3. Ensure PayPal developer account is active
+    4. Review application logs for specific error messages
+    5. Test with PayPal's sandbox test accounts
+  </Accordion>
+
+  <Accordion title="Image uploads failing">
+    **Symptoms**: Tour images don't upload
+    
+    **Solutions**:
+    1. Verify `wwwroot/uploads/` directory exists
+    2. Check directory has write permissions
+    3. Ensure file size is within limits
+    4. Verify image format is supported (JPG, PNG)
+  </Accordion>
+
+  <Accordion title="Email notifications not sending">
+    **Symptoms**: Users don't receive emails
+    
+    **Solutions**:
+    1. Verify SMTP settings are correct
+    2. Check SMTP server allows connections from your IP
+    3. For Gmail, ensure "App Passwords" are enabled
+    4. Review firewall rules for outbound SMTP (port 587)
+    5. Check application logs for SMTP errors
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tour Management" icon="map">
+    Learn how to create, edit, and manage tours with all features
+  </Card>
+  <Card title="User Authentication" icon="user-lock">
+    Understand the authentication flow and user management
+  </Card>
+  <Card title="Booking System" icon="ticket">
+    Explore the multi-step booking workflow and reservation management
+  </Card>
+  <Card title="Dashboard Features" icon="chart-line">
+    Discover creator dashboard capabilities and reports
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+<CardGroup cols={2}>
+  <Card title=".NET Documentation" icon="book" href="https://docs.microsoft.com/dotnet/">
+    Official Microsoft .NET documentation
+  </Card>
+  <Card title="Blazor Server" icon="bolt" href="https://docs.microsoft.com/aspnet/core/blazor/">
+    Learn more about Blazor Server
+  </Card>
+  <Card title="SQL Server" icon="database" href="https://docs.microsoft.com/sql/">
+    SQL Server documentation and guides
+  </Card>
+  <Card title="PayPal Developer" icon="credit-card" href="https://developer.paypal.com">
+    PayPal integration documentation
+  </Card>
+</CardGroup>
+
+<Tip>
+  For a quick setup without detailed configuration, see the [Quick Start Guide](/quickstart).
+</Tip>

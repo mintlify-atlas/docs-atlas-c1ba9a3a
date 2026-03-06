@@ -1,0 +1,563 @@
+---
+title: 'Reviews and Likes'
+description: 'Leave reviews, rate tours, and manage your favorite experiences'
+---
+
+## Overview
+
+AndanDo's review and like system helps you share your tour experiences with the community and keep track of tours that interest you. This guide covers leaving reviews, rating tours, and managing your liked content.
+
+## Review System
+
+Authenticated users can leave reviews on tours they've experienced, helping future customers make informed decisions.
+
+### Leaving a Review
+
+<Steps>
+  <Step title="Navigate to Tour Details">
+    Go to `/tours/details/{TourId}` for the tour you want to review.
+  </Step>
+  
+  <Step title="Scroll to Reviews Section">
+    Find the "Comentarios y Reseñas" section. If not authenticated, you'll see a locked state message:
+    
+    ```razor
+    <div class="comment-card -locked">
+        <i class="icon-lock"></i>
+        <p>Inicia sesión para dejar un comentario</p>
+    </div>
+    ```
+  </Step>
+  
+  <Step title="Select Star Rating">
+    Click on stars (1-5) to set your rating. Active stars highlight in orange:
+    
+    ```css
+    .comment-star.-active {
+        background: rgba(235, 102, 43, 0.1);
+        color: #eb662b;
+        border-color: rgba(235, 102, 43, 0.25);
+        box-shadow: 0 0 0 3px rgba(235, 102, 43, 0.12);
+    }
+    ```
+  </Step>
+  
+  <Step title="Write Your Comment">
+    Enter your experience in the textarea (2000 character limit). The field has:
+    - Rounded corners (12px border-radius)
+    - Minimum 120px height
+    - Vertical resize capability
+    - Focus state with orange accent
+  </Step>
+  
+  <Step title="Submit Review">
+    Click **"Publicar Comentario"**. Your review is saved via `IReviewService.AddReviewAsync()`.
+  </Step>
+</Steps>
+
+<Info>
+  All reviews are visible by default (`EsVisible = true`) and timestamped with `FechaCreacion` in UTC.
+</Info>
+
+### Review Validation
+
+The backend enforces strict validation:
+
+```csharp
+public async Task AddReviewAsync(
+    int serviceId, 
+    int userId, 
+    int rating, 
+    string comment, 
+    CancellationToken cancellationToken = default)
+{
+    if (serviceId <= 0) 
+        throw new ArgumentException("ServiceId inválido.", nameof(serviceId));
+    if (userId <= 0) 
+        throw new ArgumentException("Usuario inválido.", nameof(userId));
+    if (rating is < 1 or > 5) 
+        throw new ArgumentOutOfRangeException(nameof(rating));
+    if (string.IsNullOrWhiteSpace(comment)) 
+        throw new ArgumentException("El comentario es requerido.");
+    
+    // Insert into ServiceReviews table
+}
+```
+
+<Warning>
+  Reviews require:
+  - Valid service ID (tour ID)
+  - Authenticated user ID  
+  - Rating between 1-5 stars
+  - Non-empty comment text
+</Warning>
+
+## Viewing Reviews
+
+### Review Cards
+
+Published reviews display in a responsive grid (`review-list`):
+
+<CardGroup cols={2}>
+  <Card title="User Avatar" icon="user-circle">
+    Shows profile photo or generated initial circle with gradient background
+  </Card>
+  
+  <Card title="User Info" icon="id-card">
+    Displays full name from `Nombre` and `Apellido` fields
+  </Card>
+  
+  <Card title="Star Rating" icon="star">
+    Visual 5-star display with yellow highlights for rating value
+  </Card>
+  
+  <Card title="Comment Text" icon="message">
+    Review content with timestamp
+  </Card>
+</CardGroup>
+
+### Verified Purchaser Badge
+
+Some reviews may show a "Compra verificada" badge:
+
+```css
+.review-badge {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
+    border: 1px solid rgba(76, 175, 80, 0.25);
+}
+```
+
+<Note>
+  Reviews are sorted by most recent first using `ORDER BY r.FechaCreacion DESC` in the query.
+</Note>
+
+### Review Retrieval
+
+Reviews are loaded via `IReviewService.GetReviewsAsync()`:
+
+```csharp
+public async Task<IReadOnlyList<ServiceReviewDto>> GetReviewsAsync(
+    int serviceId,
+    int top = 50,
+    CancellationToken cancellationToken = default)
+{
+    // Joins ServiceReviews with Usuarios table
+    // Returns up to 'top' visible reviews
+}
+```
+
+Each `ServiceReviewDto` contains:
+- Review ID
+- Service (tour) ID
+- User ID and profile data
+- Rating (1-5)
+- Comment text
+- Visibility flag
+- Creation and edit timestamps
+
+## Rating Aggregation
+
+### Tour Ratings
+
+Tour cards display aggregate ratings:
+
+```razor
+<div class="mp-card__rating">
+    <div style="display:flex;gap:2px;">
+        @for (var s = 1; s <= 5; s++)
+        {
+            <i class="icon-star text-10 @GetStarClass(tour, s)"></i>
+        }
+    </div>
+    <span>@GetRatingText(tour)</span>
+</div>
+```
+
+Rating text shows:
+- **"4.7 (23)"** - Average rating with review count
+- **"Sin clasificar (0)"** - No reviews yet
+
+### Star Display Logic
+
+```csharp
+private static string GetStarClass(TourMarketplaceItemDto tour, int star)
+{
+    var avg = tour.AvgRating ?? 0;
+    return avg >= star - 0.25 ? "text-yellow-2" : "text-light-2";
+}
+```
+
+Stars fill based on average rating:
+- Full stars for values ≥ star position - 0.25
+- Empty stars (gray) otherwise
+
+<Tip>
+  The 0.25 threshold allows for partial star rendering, showing ratings like 4.8 with 4 full stars and 1 nearly-full star.
+</Tip>
+
+### Owner Aggregate Rating
+
+Tour providers have an overall rating calculated from all their tours:
+
+```csharp
+public async Task<(double? AvgRating, int RatingCount)> GetOwnerRatingAsync(
+    int ownerUserId,
+    CancellationToken cancellationToken = default)
+{
+    // Joins ServiceReviews with Tour table
+    // Averages all visible reviews for tours owned by this user
+    // Returns null if no reviews exist
+}
+```
+
+Displayed in the owner profile card as:
+- **Rating chip** with star icon and numeric value
+- **Review count** in gray text
+
+## Like System
+
+The like feature lets you bookmark tours for future reference without leaving reviews.
+
+### Liking a Tour
+
+<Steps>
+  <Step title="Find the Heart Icon">
+    On tour cards (marketplace, search results) or detail pages, locate the heart button.
+    
+    On marketplace cards, it's positioned in the top-right corner of the image:
+    
+    ```css
+    .mp-card__fav {
+        position: absolute;
+        top: 12px; 
+        right: 12px;
+        width: 36px; 
+        height: 36px;
+        border-radius: 50%;
+        background: rgba(255,255,255,.9);
+    }
+    ```
+  </Step>
+  
+  <Step title="Click to Like">
+    Click the heart icon. If authenticated:
+    - Heart fills with orange color
+    - Button background changes to orange (#eb662b)
+    - Like is saved to database
+    
+    If not authenticated:
+    - Toast message appears: "Inicia sesión para dar like"
+  </Step>
+  
+  <Step title="Unlike">
+    Click again to remove the like. The heart returns to outline state and the record is deleted from `PostLikes` table.
+  </Step>
+</Steps>
+
+### Like Button States
+
+The like button has three visual states:
+
+<Accordion title="Default (Not Liked)">
+  - White background with transparency
+  - Gray outline heart icon
+  - Hover shows subtle background change
+  
+  ```css
+  .mp-card__fav {
+      background: rgba(255,255,255,.9);
+  }
+  .fav-svg {
+      stroke: #374151;
+      fill: none;
+  }
+  ```
+</Accordion>
+
+<Accordion title="Active (Liked)">
+  - Orange background (#eb662b)
+  - White heart icon with subtle fill
+  - Enhanced box shadow
+  
+  ```css
+  .mp-card__fav.-active {
+      background: #eb662b;
+      border-color: #eb662b;
+      box-shadow: 0 4px 14px rgba(235,102,43,.45);
+  }
+  .mp-card__fav.-active .fav-svg {
+      stroke: #fff;
+      fill: rgba(255,255,255,.25);
+  }
+  ```
+</Accordion>
+
+<Accordion title="Processing (Toggling)">
+  - Shows loading spinner
+  - Button disabled during API call
+  - Prevents double-clicking
+  
+  ```csharp
+  private bool IsToggling(int tourId) => _togglingLikes.Contains(tourId);
+  ```
+</Accordion>
+
+### Like Persistence
+
+Likes are managed by `IPostLikeService`:
+
+```csharp
+public interface IPostLikeService
+{
+    Task<bool> HasUserLikedAsync(int userId, int postId, CancellationToken ct = default);
+    Task AddLikeAsync(int userId, int postId, CancellationToken ct = default);
+    Task RemoveLikeAsync(int userId, int postId, CancellationToken ct = default);
+    Task<IReadOnlyList<LikedTourSummaryDto>> GetUserLikedToursAsync(int userId, CancellationToken ct = default);
+}
+```
+
+#### Database Operations
+
+**Adding a Like:**
+```sql
+IF NOT EXISTS (SELECT 1 FROM PostLikes WHERE UsuarioId = @UserId AND PostId = @PostId)
+BEGIN
+    INSERT INTO PostLikes (UsuarioId, PostId) VALUES (@UserId, @PostId);
+END
+```
+
+**Removing a Like:**
+```sql
+DELETE FROM PostLikes
+WHERE UsuarioId = @UserId AND PostId = @PostId
+```
+
+**Checking Like Status:**
+```sql
+SELECT 1
+FROM PostLikes
+WHERE UsuarioId = @UserId AND PostId = @PostId
+```
+
+<Info>
+  The `PostLikes` table may include optional `CreatedAt` or `FechaLike` timestamps for tracking when likes were added.
+</Info>
+
+### Like Loading on Page Load
+
+When authenticated users visit the marketplace, their existing likes are loaded:
+
+```csharp
+private async Task LoadUserLikesAsync()
+{
+    _likedTours.Clear();
+    
+    if (!Session.IsAuthenticated || Session.Current is null || !Tours.Any())
+        return;
+    
+    var tasks = Tours.Select(async t => new
+    {
+        t.Tour.TourId,
+        Liked = await PostLikeService.HasUserLikedAsync(
+            Session.Current.UserId, 
+            t.Tour.TourId)
+    });
+    
+    var results = await Task.WhenAll(tasks);
+    _likedTours = results.Where(r => r.Liked).Select(r => r.TourId).ToHashSet();
+}
+```
+
+This batch operation:
+1. Queries all visible tours in parallel
+2. Checks like status for each
+3. Populates `_likedTours` HashSet for O(1) lookup
+4. Triggers UI re-render with correct heart states
+
+## Viewing Your Liked Tours
+
+Access your saved tours via `GetUserLikedToursAsync()`:
+
+```csharp
+public async Task<IReadOnlyList<LikedTourSummaryDto>> GetUserLikedToursAsync(
+    int userId,
+    CancellationToken cancellationToken = default)
+{
+    // Joins PostLikes with Tour table
+    // Returns tour summaries with images, prices, and like timestamps
+    // Ordered by most recently liked (if timestamp available)
+}
+```
+
+### LikedTourSummaryDto Structure
+
+Each liked tour includes:
+
+<CardGroup cols={2}>
+  <Card title="Basic Info" icon="info-circle">
+    Tour ID, title, and location label
+  </Card>
+  
+  <Card title="Visual" icon="image">
+    First image URL from ImageList
+  </Card>
+  
+  <Card title="Pricing" icon="dollar-sign">
+    Minimum price and currency code (default: DOP)
+  </Card>
+  
+  <Card title="Metadata" icon="clock">
+    Duration label and timestamp when liked
+  </Card>
+</CardGroup>
+
+## Owner Statistics
+
+Tour providers can track engagement through like statistics:
+
+```csharp
+public async Task<(int TotalLikes, int RecentLikes)> GetOwnerLikeStatsAsync(
+    int ownerUserId,
+    int recentDays = 7,
+    CancellationToken cancellationToken = default)
+{
+    // Counts all likes on tours owned by this user
+    // Optionally filters for likes within recent days (if CreatedAt exists)
+}
+```
+
+Useful for:
+- **Dashboard metrics**: Show total engagement
+- **Trending indicators**: Highlight recently popular tours
+- **Analytics**: Track growth over time
+
+<Note>
+  Recent likes counting requires the `CreatedAt` column in the `PostLikes` table. If this column doesn't exist, only total likes are returned.
+</Note>
+
+## Toast Notifications
+
+The like system provides user feedback via toast messages:
+
+### Like Toast on Marketplace
+
+When you interact with the heart button, a toast appears near the button:
+
+```razor
+@if (_likeToastTourId == tour.TourId && !string.IsNullOrWhiteSpace(_likeToastMessage))
+{
+    <div class="like-toast-card">@_likeToastMessage</div>
+}
+```
+
+Common messages:
+- **"Inicia sesión para dar like."** - Not authenticated
+- **"No pudimos actualizar tu like."** - Error occurred
+
+### Toast Styling
+
+```css
+.like-toast-card {
+    position: absolute;
+    bottom: 12px; 
+    right: 54px;
+    background: #0c0c3d;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,.18);
+    z-index: 5;
+}
+```
+
+Toasts auto-dismiss after 2 seconds:
+
+```csharp
+private async Task ShowLikeToastAsync(string message, int tourId)
+{
+    _likeToastMessage = message;
+    _likeToastTourId = tourId;
+    await InvokeAsync(StateHasChanged);
+    
+    await Task.Delay(2000);
+    
+    _likeToastMessage = null;
+    _likeToastTourId = null;
+    await InvokeAsync(StateHasChanged);
+}
+```
+
+## Review and Rating Display
+
+Throughout the platform, ratings appear consistently:
+
+### On Tour Cards
+
+```razor
+<div class="tourCard__rating d-flex items-center text-13 mt-5">
+    <div class="d-flex x-gap-5">
+        @for (var s = 1; s <= 5; s++)
+        {
+            <div><i class="icon-star text-10 @GetStarClass(tour, s)"></i></div>
+        }
+    </div>
+    <span class="text-dark-1 ml-10">@GetRatingText(tour)</span>
+</div>
+```
+
+### On Tour Detail Page
+
+Full review cards with:
+- User profile information
+- 5-star rating display
+- Comment text
+- Timestamp
+- Optional "Compra verificada" badge
+
+### In Owner Profile
+
+Aggregate statistics showing:
+- Overall average rating across all tours
+- Total number of reviews received
+- Visual star representation
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Authentic Reviews" icon="pen">
+    Write detailed, honest reviews that help other travelers make informed decisions
+  </Card>
+  
+  <Card title="Timely Feedback" icon="clock">
+    Leave reviews soon after your tour experience while details are fresh
+  </Card>
+  
+  <Card title="Constructive Ratings" icon="star-half">
+    Use the full 1-5 star range appropriately - reserve 5 stars for exceptional experiences
+  </Card>
+  
+  <Card title="Like Management" icon="heart">
+    Regularly review your liked tours and remove those you're no longer interested in
+  </Card>
+</CardGroup>
+
+<Tip>
+  Your reviews and ratings directly influence tour visibility and help build trust in the AndanDo community!
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browsing Tours" icon="compass" href="/guides/browsing-tours">
+    Discover how to find and filter tours effectively
+  </Card>
+  
+  <Card title="Making Reservations" icon="ticket" href="/guides/making-reservations">
+    Learn the complete booking process from selection to confirmation
+  </Card>
+</CardGroup>

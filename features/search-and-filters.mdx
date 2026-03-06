@@ -1,0 +1,450 @@
+---
+title: Search & Filtering
+description: Advanced search and filtering system that helps users discover the perfect tour based on location, dates, price, and more
+icon: magnifying-glass
+---
+
+## Overview
+
+AndanDo's search system combines text-based search with intelligent filtering to help users find tours that match their preferences. The system uses Unicode normalization for international text support and real-time filtering for instant results.
+
+<CardGroup cols={2}>
+  <Card title="Text Normalization" icon="language">
+    Handles accents, diacritics, and multiple languages seamlessly
+  </Card>
+  <Card title="Multi-field Search" icon="layers">
+    Searches across title, location, and duration fields
+  </Card>
+  <Card title="Filter Combinations" icon="sliders">
+    Combine multiple filters for precise tour discovery
+  </Card>
+  <Card title="URL State Management" icon="link">
+    Share searches via URL with encoded filter parameters
+  </Card>
+</CardGroup>
+
+## Search Architecture
+
+### Query Processing Pipeline
+
+```csharp
+private async Task LoadResultsAsync()
+{
+    _loading = true;
+    _error = null;
+    try
+    {
+        // 1. Decode filter from URL
+        Filter = DecodeFilter(EncodedFilter);
+
+        // 2. Handle plain text query
+        var plainQuery = NormalizePlainQuery(PlainQuery);
+        if (Filter is null && !string.IsNullOrWhiteSpace(plainQuery))
+        {
+            Filter = new SearchFilterDto(
+                Location: plainQuery,
+                NearLabel: null,
+                Latitude: null,
+                Longitude: null,
+                DateLabel: null);
+        }
+
+        // 3. Validate search criteria
+        if (!HasSearchCriteria(Filter, plainQuery))
+        {
+            _error = "Debes ingresar algun valor para buscar.";
+            return;
+        }
+
+        // 4. Fetch and filter tours
+        var tours = await TourService.GetToursForMarketplaceAsync();
+        var searchText = BuildSearchText(Filter, plainQuery);
+        var normalizedQuery = Normalize(searchText);
+        
+        var query = tours.Where(t => IsKeywordMatch(normalizedQuery, t));
+        _results = await BuildCardViewModelsAsync(query);
+    }
+    finally
+    {
+        _loading = false;
+    }
+}
+```
+
+## Text Normalization
+
+The search system uses Unicode normalization to handle international characters:
+
+```csharp Text Normalization
+private static string Normalize(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return string.Empty;
+    }
+
+    // Decompose Unicode characters (e.g., á → a + ´)
+    var normalized = value.Trim().Normalize(NormalizationForm.FormD);
+    var sb = new StringBuilder();
+
+    // Remove diacritics (accent marks)
+    foreach (var c in normalized)
+    {
+        var category = CharUnicodeInfo.GetUnicodeCategory(c);
+        if (category != UnicodeCategory.NonSpacingMark)
+        {
+            sb.Append(c);
+        }
+    }
+
+    // Recompose and clean
+    var noDiacritics = sb.ToString().Normalize(NormalizationForm.FormC);
+    var lettersAndSpaces = new string(noDiacritics
+        .Where(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch))
+        .ToArray());
+
+    // Normalize whitespace and lowercase
+    return Regex.Replace(lettersAndSpaces, "\\s+", " ").Trim().ToLowerInvariant();
+}
+```
+
+<Note>
+This normalization allows searches to match regardless of accents. For example, "Punta Cana" will match "punta cana", "Punta Caná", or "PUNTA CANA".
+</Note>
+
+## Search Filter DTO
+
+The search system uses a structured filter object:
+
+```csharp SearchFilterDto
+public record SearchFilterDto(
+    string? Location,
+    string? NearLabel,
+    double? Latitude,
+    double? Longitude,
+    string? DateLabel
+);
+```
+
+### URL Encoding
+
+Filters are Base64URL-encoded for sharing:
+
+```csharp Filter Encoding/Decoding
+private static SearchFilterDto? DecodeFilter(string? encoded)
+{
+    if (string.IsNullOrWhiteSpace(encoded))
+    {
+        return null;
+    }
+
+    try
+    {
+        var bytes = WebEncoders.Base64UrlDecode(encoded);
+        var json = Encoding.UTF8.GetString(bytes);
+        return JsonSerializer.Deserialize<SearchFilterDto>(json);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex);
+        return null;
+    }
+}
+```
+
+<Info>
+Base64URL encoding allows complex filter objects to be safely embedded in URLs and shared between users.
+</Info>
+
+## Keyword Matching
+
+The search engine uses intelligent keyword matching:
+
+```csharp Keyword Matching
+private static bool IsKeywordMatch(string normalizedQuery, TourMarketplaceItemDto tour)
+{
+    if (string.IsNullOrWhiteSpace(normalizedQuery))
+    {
+        return true;
+    }
+
+    // Build searchable text from tour fields
+    var normalizedTitle = Normalize(tour.Title);
+    var normalizedLocation = Normalize(tour.LocationLabel);
+    var normalizedDuration = Normalize(tour.DurationLabel);
+    var combined = $"{normalizedTitle} {normalizedLocation} {normalizedDuration}".Trim();
+
+    if (string.IsNullOrWhiteSpace(combined))
+    {
+        return false;
+    }
+
+    // Check for exact phrase match
+    if (combined.Contains(normalizedQuery))
+    {
+        return true;
+    }
+
+    // Check if all tokens are present (AND logic)
+    var tokens = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    return tokens.All(token => combined.Contains(token));
+}
+```
+
+<Steps>
+  <Step title="Phrase Matching">
+    First checks if the entire search phrase exists in the tour data
+  </Step>
+  <Step title="Token Matching">
+    If phrase doesn't match, splits query into tokens and requires all tokens to be present
+  </Step>
+  <Step title="Normalized Comparison">
+    All comparisons use normalized text for accent-insensitive matching
+  </Step>
+</Steps>
+
+## Search UI Components
+
+### Desktop Search Bar
+
+```razor Desktop Searchbar Component
+<div class="search-desktop-only">
+    <Searchbar />
+</div>
+```
+
+The Searchbar component provides location autocomplete and date picking.
+
+### Mobile Search
+
+```razor Mobile Search Form
+<div class="search-mobile-search">
+    <form class="search-mobile-search__form"
+          @onsubmit="ExecuteMobileSearch"
+          @onsubmit:preventDefault="true">
+        <span class="search-mobile-search__icon">
+            <i class="icon-search text-16"></i>
+        </span>
+        <input class="search-mobile-search__input"
+               placeholder="Buscar servicios o ubicacion"
+               @bind="MobileSearchText"
+               @bind:event="oninput" />
+        <button type="submit" class="button -sm -dark-1 bg-accent-1 text-white">
+            Buscar
+        </button>
+    </form>
+    @if (!string.IsNullOrWhiteSpace(_mobileSearchMessage))
+    {
+        <div class="search-mobile-search__error">@_mobileSearchMessage</div>
+    }
+</div>
+```
+
+```csharp Mobile Search Handler
+private void ExecuteMobileSearch()
+{
+    var query = _mobileSearchText?.Trim();
+    if (string.IsNullOrWhiteSpace(query))
+    {
+        _mobileSearchMessage = "Debes ingresar algun valor para buscar.";
+        return;
+    }
+
+    _mobileSearchMessage = null;
+    var url = $"/search?q={Uri.EscapeDataString(query)}";
+    NavigationManager.NavigateTo(url);
+}
+```
+
+## Filter Display
+
+Search results show active filters as chips:
+
+```razor Filter Chips Display
+<div class="search-hero">
+    <div class="search-hero__title fw-700">Resultados de busqueda</div>
+    <div class="d-flex x-gap-8 y-gap-8 flex-wrap">
+        @if (!string.IsNullOrWhiteSpace(Filter?.Location))
+        {
+            <span class="chip">
+                <i class="icon-pin"></i>Donde: @Filter.Location
+            </span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Filter?.NearLabel))
+        {
+            <span class="chip">
+                <i class="icon-pin"></i>Cerca de ti: @Filter.NearLabel
+            </span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Filter?.DateLabel))
+        {
+            <span class="chip">
+                <i class="icon-calendar"></i>@Filter.DateLabel
+            </span>
+        }
+    </div>
+</div>
+```
+
+## Combined Filter Logic
+
+The marketplace page supports combining multiple filters:
+
+```csharp Combined Filtering
+private IEnumerable<TourCardViewModel> FilteredTours => Tours
+    .Where(c =>
+    {
+        // Text search
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var q = _searchQuery;
+            if (!c.Tour.Title.Contains(q, StringComparison.OrdinalIgnoreCase) &&
+                !(c.Tour.LocationLabel?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))
+                return false;
+        }
+        
+        // Duration filter
+        if (_durationFilter == "short")
+        {
+            var dur = c.Tour.DurationLabel ?? "";
+            if (!dur.Contains("hora", StringComparison.OrdinalIgnoreCase) &&
+                !dur.Contains("min", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        
+        if (_durationFilter == "long")
+        {
+            var dur = c.Tour.DurationLabel ?? "";
+            if (!dur.Contains("día", StringComparison.OrdinalIgnoreCase) &&
+                !dur.Contains("dia", StringComparison.OrdinalIgnoreCase) &&
+                !dur.Contains("semana", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        
+        // Price filter
+        if (_priceFilter == "low" && c.Tour.FromPrice.HasValue && c.Tour.FromPrice.Value > 3000m)
+            return false;
+        if (_priceFilter == "high" && c.Tour.FromPrice.HasValue && c.Tour.FromPrice.Value <= 3000m)
+            return false;
+        
+        // Upcoming filter
+        if (_onlyUpcoming && !c.IsUpcoming)
+            return false;
+
+        return true;
+    })
+    .OrderBy(c => _sortOrder switch
+    {
+        "priceLow"  => c.Tour.FromPrice ?? decimal.MaxValue,
+        "priceHigh" => -(c.Tour.FromPrice ?? 0m),
+        _           => 0m
+    });
+```
+
+<Warning>
+All filtering happens in-memory on the server. For production deployments with large tour catalogs, consider moving filter logic to SQL stored procedures.
+</Warning>
+
+## Empty State Handling
+
+```razor Empty Search Results
+@if (!_results.Any())
+{
+    <div class="empty-state">
+        <div class="empty-icon"><i class="icon-search"></i></div>
+        <div class="text-16 fw-600">No encontramos servicios con este filtro.</div>
+        <div class="text-13 text-light-2">Prueba con otra ubicacion o ajusta las fechas.</div>
+        <a class="button -sm -dark-1 mt-10" href="#refilter">Ajustar busqueda</a>
+    </div>
+}
+```
+
+## Query Parameters
+
+The search page supports two query parameter formats:
+
+<CodeGroup>
+```url Plain Text Query
+/search?q=punta%20cana
+```
+
+```url Encoded Filter Object
+/search?f=eyJMb2NhdGlvbiI6IlB1bnRhIENhbmEiLCJEYXRlTGFiZWwiOiJEaWMgMjAyNCJ9
+```
+</CodeGroup>
+
+```csharp Query Parameters
+[Parameter, SupplyParameterFromQuery(Name = "f")] 
+public string? EncodedFilter { get; set; }
+
+[Parameter, SupplyParameterFromQuery(Name = "q")] 
+public string? PlainQuery { get; set; }
+```
+
+## Search Analytics
+
+Track search performance and user behavior:
+
+```csharp Search Metrics
+private async Task LoadResultsAsync()
+{
+    var stopwatch = Stopwatch.StartNew();
+    try
+    {
+        // Load and filter results...
+    }
+    finally
+    {
+        stopwatch.Stop();
+        Console.WriteLine($"Search completed in {stopwatch.ElapsedMilliseconds}ms");
+        Console.WriteLine($"Query: {BuildSearchText(Filter, PlainQuery)}");
+        Console.WriteLine($"Results: {_results.Count}");
+    }
+}
+```
+
+## Performance Optimization
+
+<CardGroup cols={2}>
+  <Card title="Debouncing" icon="clock">
+    Implement search debouncing to reduce server load during typing
+  </Card>
+  
+  <Card title="Caching" icon="database">
+    Cache normalized tour data to avoid repeated text processing
+  </Card>
+  
+  <Card title="Indexing" icon="magnifying-glass-plus">
+    Use full-text search indexes in SQL Server for large datasets
+  </Card>
+  
+  <Card title="Pagination" icon="list-ol">
+    Load results in pages rather than all at once
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<Steps>
+  <Step title="Validate Input">
+    Always validate and sanitize search queries before processing
+  </Step>
+  <Step title="Handle Empty Queries">
+    Provide helpful error messages for empty or invalid searches
+  </Step>
+  <Step title="Preserve State">
+    Keep search state in URL for sharing and browser history
+  </Step>
+  <Step title="Show Progress">
+    Display loading indicators during search operations
+  </Step>
+  <Step title="Optimize Queries">
+    Use database-level filtering for large datasets
+  </Step>
+</Steps>
+
+## Next Steps
+
+<Card title="Explore Booking System" icon="ticket" href="/features/booking-system">
+  Learn how users book tours through AndanDo's multi-step checkout flow
+</Card>

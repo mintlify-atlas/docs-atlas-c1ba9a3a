@@ -1,0 +1,767 @@
+---
+title: 'TourService API'
+description: 'Core service for managing tours, reservations, and related entities'
+icon: 'map'
+---
+
+## Overview
+
+The `TourService` provides comprehensive methods for managing tours in the AndanDo marketplace. It handles tour creation, updates, deletion, marketplace listings, reservations, and all related entities like tickets, extras, itineraries, and FAQs.
+
+## Interface
+
+```csharp
+public interface ITourService
+```
+
+Location: `~/workspace/source/AndanDo/Services/Tour/TourService.cs`
+
+---
+
+## Tour Management
+
+### CreateTourAsync
+
+Creates a new tour in the system and returns the generated tour ID.
+
+```csharp
+Task<int> CreateTourAsync(
+    TourRegistrationRequest request,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="request" type="TourRegistrationRequest" required>
+  Tour registration data including owner, title, location, description, and images
+  
+  <Expandable title="TourRegistrationRequest properties">
+    - `OwnerUserId` (string) - User ID of the tour owner
+    - `Title` (string) - Tour title
+    - `LocationLabel` (string) - Location display text
+    - `ShortDescription` (string) - Brief tour description
+    - `DescriptionHtml` (string) - Full HTML description
+    - `ImageList` (string) - Comma-separated image URLs
+    - `IsActive` (bool) - Active status flag
+    - `MuestraInstantanea` (bool) - Show as featured/instant booking
+    - `IsQuote` (bool) - Whether this is a quote-based service
+    - `IsNoPayment` (bool) - Whether payment is disabled
+    - `QuoteDepositPercent` (decimal?) - Deposit percentage for quotes
+    - `QuoteDueDays` (int?) - Days until payment is due
+  </Expandable>
+</ParamField>
+
+<ParamField path="cancellationToken" type="CancellationToken" default="default">
+  Optional cancellation token
+</ParamField>
+
+<ResponseField name="tourId" type="int">
+  The newly created tour's unique identifier
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var request = new TourRegistrationRequest(
+    OwnerUserId: "123",
+    Title: "Beach Adventure Tour",
+    LocationLabel: "Punta Cana, Dominican Republic",
+    ShortDescription: "Experience pristine beaches",
+    DescriptionHtml: "<p>Full description...</p>",
+    ImageList: "image1.jpg,image2.jpg",
+    IsActive: true,
+    MuestraInstantanea: true,
+    IsQuote: false,
+    IsNoPayment: false,
+    QuoteDepositPercent: null,
+    QuoteDueDays: null,
+    CreatedAt: DateTime.UtcNow,
+    UpdatedAt: null
+);
+
+int tourId = await tourService.CreateTourAsync(request);
+```
+</CodeGroup>
+
+---
+
+### UpdateTourAsync
+
+Updates an existing tour with new information.
+
+```csharp
+Task UpdateTourAsync(
+    int tourId,
+    TourRegistrationRequest request,
+    bool isActive,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="tourId" type="int" required>
+  The ID of the tour to update
+</ParamField>
+
+<ParamField path="request" type="TourRegistrationRequest" required>
+  Updated tour data
+</ParamField>
+
+<ParamField path="isActive" type="bool" required>
+  Whether the tour should be active
+</ParamField>
+
+<Note>
+This method automatically updates the `UpdatedAt` timestamp to the current UTC time.
+</Note>
+
+---
+
+### UpdateTourStatusAsync
+
+Updates only the status field of a tour.
+
+```csharp
+Task<bool> UpdateTourStatusAsync(
+    int tourId,
+    string status,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="tourId" type="int" required>
+  The tour ID
+</ParamField>
+
+<ParamField path="status" type="string" required>
+  New status value (e.g., "draft", "published", "archived")
+</ParamField>
+
+<ResponseField name="success" type="bool">
+  Returns `true` if the status was updated, `false` otherwise
+</ResponseField>
+
+---
+
+### DeleteTourAsync
+
+Permanently deletes a tour and all related data.
+
+```csharp
+Task DeleteTourAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="tourId" type="int" required>
+  The tour ID to delete
+</ParamField>
+
+<Warning>
+  This operation cannot be undone. The method will throw an exception if the tour has any reservations.
+</Warning>
+
+<Info>
+  Automatically cascades deletion to:
+  - Ticket types
+  - Extras and pricing
+  - FAQs
+  - Inclusions
+  - Info items
+  - Itinerary steps
+  - Service locations
+  - Tour dates
+  - Reviews and likes
+</Info>
+
+---
+
+### DeleteTourDetailsAsync
+
+Deletes all child entities of a tour without deleting the tour itself.
+
+```csharp
+Task DeleteTourDetailsAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+---
+
+## Tour Queries
+
+### GetTourFullByIdAsync
+
+Retrieves complete tour details including all related entities.
+
+```csharp
+Task<TourFullDetailDto?> GetTourFullByIdAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="tourId" type="int" required>
+  The tour ID to retrieve
+</ParamField>
+
+<ResponseField name="tour" type="TourFullDetailDto?">
+  Complete tour data or null if not found
+  
+  <Expandable title="TourFullDetailDto structure">
+    - `TourId` (int) - Tour identifier
+    - `OwnerUserId` (int) - Owner user ID
+    - `Title` (string) - Tour title
+    - `LocationLabel` (string) - Location
+    - `ImageList` (string?) - Comma-separated images
+    - `DescriptionHtml` (string?) - HTML description
+    - `ShortDescription` (string?) - Short description
+    - `IsActive` (bool) - Active status
+    - `MuestraInstantanea` (bool) - Featured flag
+    - `IsQuote` (bool) - Quote mode
+    - `IsNoPayment` (bool) - No payment flag
+    - `QuoteDepositPercent` (decimal?) - Deposit percentage
+    - `QuoteDueDays` (int?) - Payment due days
+    - `CreatedAt` (DateTime) - Creation timestamp
+    - `UpdatedAt` (DateTime?) - Last update timestamp
+    - `TicketTypes` (IReadOnlyList&lt;TourTicketTypeDetailDto&gt;) - Ticket types
+    - `Extras` (IReadOnlyList&lt;TourExtraDetailDto&gt;) - Tour extras
+    - `Faqs` (IReadOnlyList&lt;TourFaqDetailDto&gt;) - FAQ items
+    - `Inclusions` (IReadOnlyList&lt;TourInclusionDetailDto&gt;) - Inclusions/exclusions
+    - `InfoItems` (IReadOnlyList&lt;TourInfoItemDetailDto&gt;) - Hero info items
+    - `Itinerary` (IReadOnlyList&lt;TourItineraryItemDetailDto&gt;) - Day-by-day itinerary
+    - `ServiceLocations` (IReadOnlyList&lt;ServicioUbicacionDetailDto&gt;) - Location URLs
+  </Expandable>
+</ResponseField>
+
+---
+
+### GetToursForMarketplaceAsync
+
+Retrieves all active tours for the marketplace display.
+
+```csharp
+Task<IReadOnlyList<TourMarketplaceItemDto>> GetToursForMarketplaceAsync(
+    CancellationToken cancellationToken = default)
+```
+
+<ResponseField name="tours" type="IReadOnlyList<TourMarketplaceItemDto>">
+  List of tours with marketplace display data including ratings and pricing
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var tours = await tourService.GetToursForMarketplaceAsync();
+
+foreach (var tour in tours)
+{
+    Console.WriteLine($"{tour.Title} - From ${tour.FromPrice}");
+    Console.WriteLine($"Rating: {tour.AvgRating:F1} ({tour.RatingCount} reviews)");
+}
+```
+</CodeGroup>
+
+---
+
+### GetLatestPublishedToursForSliderAsync
+
+Retrieves the most recent published tours for homepage slider.
+
+```csharp
+Task<List<SlideDTO>> GetLatestPublishedToursForSliderAsync(
+    int top = 4,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="top" type="int" default="4">
+  Number of tours to retrieve
+</ParamField>
+
+---
+
+### GetCountToursAsync
+
+Retrieves a limited number of tours.
+
+```csharp
+Task<IReadOnlyList<TourMarketplaceItemDto>> GetCountToursAsync(
+    int topRows,
+    CancellationToken cancellationToken = default)
+```
+
+---
+
+### GetOwnerToursAsync
+
+Retrieves tours belonging to a specific owner.
+
+```csharp
+Task<IReadOnlyList<TourMarketplaceItemDto>> GetOwnerToursAsync(
+    int ownerUserId,
+    int topRows,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="ownerUserId" type="int" required>
+  The owner's user ID
+</ParamField>
+
+<ParamField path="topRows" type="int" required>
+  Maximum number of tours to return
+</ParamField>
+
+---
+
+### GetAllToursForAdminAsync
+
+Retrieves all tours for administrative purposes.
+
+```csharp
+Task<IReadOnlyList<TourAdminSummaryDto>> GetAllToursForAdminAsync(
+    CancellationToken cancellationToken = default)
+```
+
+---
+
+### GetTourVisibilityAsync
+
+Retrieves visibility settings for a tour.
+
+```csharp
+Task<(DateTime? StartDate, DateTime? EndDate, bool MuestraInstantanea, string? Status)> 
+    GetTourVisibilityAsync(
+        int tourId,
+        CancellationToken cancellationToken = default)
+```
+
+---
+
+### GetTourDateRangeAsync
+
+Retrieves the date range for a tour.
+
+```csharp
+Task<(DateTime? StartDate, DateTime? EndDate)> GetTourDateRangeAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+---
+
+## Tour Details Management
+
+### UpsertHeroInfoAsync
+
+Inserts or updates hero information items (duration, group size, etc.).
+
+```csharp
+Task UpsertHeroInfoAsync(
+    int tourId,
+    IEnumerable<TourInfoItemRequest> infoItems,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="tourId" type="int" required>
+  The tour ID
+</ParamField>
+
+<ParamField path="infoItems" type="IEnumerable<TourInfoItemRequest>" required>
+  Collection of info items to add
+  
+  <Expandable title="TourInfoItemRequest properties">
+    - `Label` (string) - Display label (e.g., "Duration", "Group Size")
+    - `Value` (string) - Value to display (e.g., "3 hours", "Max 15 people")
+    - `Icon` (string) - Icon key or CSS class
+    - `SortOrder` (int) - Display order
+  </Expandable>
+</ParamField>
+
+<CodeGroup>
+```csharp Example
+var infoItems = new[]
+{
+    new TourInfoItemRequest("Duration", "3 hours", "clock-icon", 1),
+    new TourInfoItemRequest("Group Size", "Max 15", "users-icon", 2),
+    new TourInfoItemRequest("Age", "18+", "age-icon", 3)
+};
+
+await tourService.UpsertHeroInfoAsync(tourId, infoItems);
+```
+</CodeGroup>
+
+---
+
+### UpsertInclusionsAsync
+
+Manages tour inclusions and exclusions.
+
+```csharp
+Task UpsertInclusionsAsync(
+    int tourId,
+    IEnumerable<TourInclusionRequest> inclusions,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="inclusions" type="IEnumerable<TourInclusionRequest>" required>
+  Collection of inclusion/exclusion items
+  
+  <Expandable title="Properties">
+    - `Text` (string) - Inclusion/exclusion text
+    - `IsIncluded` (bool) - True for inclusion, false for exclusion
+    - `SortOrder` (int) - Display order
+  </Expandable>
+</ParamField>
+
+---
+
+### UpsertItineraryAsync
+
+Manages day-by-day itinerary.
+
+```csharp
+Task UpsertItineraryAsync(
+    int tourId,
+    IEnumerable<TourItineraryStepRequest> itinerary,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="itinerary" type="IEnumerable<TourItineraryStepRequest>" required>
+  Collection of itinerary steps
+  
+  <Expandable title="TourItineraryStepRequest properties">
+    - `DayNumber` (string) - Day identifier (e.g., "Day 1", "1")
+    - `Title` (string) - Step title
+    - `DescriptionHtml` (string) - HTML description of the day's activities
+    - `SortOrder` (int) - Display order
+  </Expandable>
+</ParamField>
+
+---
+
+### UpsertFaqAsync
+
+Manages frequently asked questions.
+
+```csharp
+Task UpsertFaqAsync(
+    int tourId,
+    IEnumerable<TourFaqRequest> faqs,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="faqs" type="IEnumerable<TourFaqRequest>" required>
+  Collection of FAQ items
+  
+  <Expandable title="Properties">
+    - `Question` (string) - The question
+    - `AnswerHtml` (string) - HTML answer
+    - `SortOrder` (int) - Display order
+  </Expandable>
+</ParamField>
+
+---
+
+### UpsertServiceLocationsAsync
+
+Manages service location URLs (maps, meeting points).
+
+```csharp
+Task UpsertServiceLocationsAsync(
+    int tourId,
+    IEnumerable<ServicioUbicacionRequest> locations,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="locations" type="IEnumerable<ServicioUbicacionRequest>" required>
+  Collection of location URLs
+  
+  <Expandable title="Properties">
+    - `Url` (string) - Location URL (Google Maps, etc.)
+  </Expandable>
+</ParamField>
+
+---
+
+### UpsertTourDatesAsync
+
+Sets the tour's availability date range.
+
+```csharp
+Task UpsertTourDatesAsync(
+    int tourId,
+    DateTime startDate,
+    DateTime? endDate,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="startDate" type="DateTime" required>
+  Tour start date
+</ParamField>
+
+<ParamField path="endDate" type="DateTime?">
+  Optional tour end date (null for ongoing)
+</ParamField>
+
+---
+
+## Ticket Management
+
+### UpsertTicketTypesAsync
+
+Replaces all ticket types for a tour.
+
+```csharp
+Task UpsertTicketTypesAsync(
+    int tourId,
+    IEnumerable<TourTicketTypeRequest> tickets,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="tickets" type="IEnumerable<TourTicketTypeRequest>" required>
+  Collection of ticket types
+  
+  <Expandable title="TourTicketTypeRequest properties">
+    - `Name` (string) - Ticket name (e.g., "Adult", "Child")
+    - `MinAge` (int?) - Minimum age
+    - `MaxAge` (int?) - Maximum age
+    - `Price` (decimal?) - Ticket price
+    - `CurrencyCode` (string) - Currency code (USD, DOP, etc.)
+    - `SortOrder` (int) - Display order
+    - `CapacidadPorTipo` (int?) - Capacity for this ticket type
+    - `VentaInicioUtc` (DateTime?) - Sale start date
+    - `VentaFinUtc` (DateTime?) - Sale end date
+    - `MaxPorOrden` (int?) - Max per order
+    - `MaxPorUsuario` (int?) - Max per user
+  </Expandable>
+</ParamField>
+
+<Warning>
+  This method deletes all existing ticket types before inserting new ones.
+</Warning>
+
+---
+
+### GetTicketTypeReservedCountAsync
+
+Gets the number of reserved tickets per ticket type.
+
+```csharp
+Task<Dictionary<int, int>> GetTicketTypeReservedCountAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+<ResponseField name="reservedCounts" type="Dictionary<int, int>">
+  Dictionary mapping ticket type ID to reserved count
+</ResponseField>
+
+---
+
+### GetTicketTypeCapacityAsync
+
+Gets the capacity for each ticket type.
+
+```csharp
+Task<Dictionary<int, int?>> GetTicketTypeCapacityAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+<ResponseField name="capacities" type="Dictionary<int, int?>">
+  Dictionary mapping ticket type ID to capacity (null = unlimited)
+</ResponseField>
+
+---
+
+## Extras Management
+
+### UpsertExtrasAsync
+
+Manages tour extras (add-ons).
+
+```csharp
+Task UpsertExtrasAsync(
+    int tourId,
+    IEnumerable<TourExtraRequest> extras,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="extras" type="IEnumerable<TourExtraRequest>" required>
+  Collection of extras
+  
+  <Expandable title="TourExtraRequest properties">
+    - `Name` (string) - Extra name
+    - `Description` (string) - Description
+    - `ChargeMode` (int) - Charging mode:
+      - `1` = Fixed price per order
+      - `2` = Per person (price varies by ticket type)
+    - `BasePrice` (decimal?) - Base price
+    - `CurrencyCode` (string) - Currency code
+    - `TicketPrices` (IEnumerable&lt;TourExtraTicketPriceRequest&gt;) - Per-ticket-type pricing
+    - `SortOrder` (int) - Display order
+  </Expandable>
+</ParamField>
+
+---
+
+## Reservations
+
+### CreateReservationAsync
+
+Creates a new tour reservation.
+
+```csharp
+Task<int> CreateReservationAsync(
+    TourReservationRequest request,
+    IEnumerable<TourReservationTicketRequest> tickets,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="request" type="TourReservationRequest" required>
+  Reservation details including user, tour, dates, and payment info
+</ParamField>
+
+<ParamField path="tickets" type="IEnumerable<TourReservationTicketRequest>" required>
+  Collection of tickets being reserved
+</ParamField>
+
+<ResponseField name="reservationId" type="int">
+  The newly created reservation ID
+</ResponseField>
+
+---
+
+### UpdateReservationPaymentStatusAsync
+
+Updates the payment status of a reservation.
+
+```csharp
+Task UpdateReservationPaymentStatusAsync(
+    int reservationId,
+    byte paymentStatus,
+    string? paymentProvider,
+    string? paymentReference,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="reservationId" type="int" required>
+  The reservation ID
+</ParamField>
+
+<ParamField path="paymentStatus" type="byte" required>
+  Payment status code (0 = pending, 1 = paid, etc.)
+</ParamField>
+
+<ParamField path="paymentProvider" type="string?">
+  Payment provider name (e.g., "PayPal")
+</ParamField>
+
+<ParamField path="paymentReference" type="string?">
+  Payment reference/transaction ID
+</ParamField>
+
+---
+
+### GetReservationsByTourAsync
+
+Retrieves all reservations for a specific tour.
+
+```csharp
+Task<IReadOnlyList<TourReservationReportDto>> GetReservationsByTourAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+```
+
+---
+
+### GetReservationsByUserAsync
+
+Retrieves all reservations for a specific user.
+
+```csharp
+Task<IReadOnlyList<TourUserReservationDto>> GetReservationsByUserAsync(
+    int userId,
+    int topRows = 50,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  The user ID
+</ParamField>
+
+<ParamField path="topRows" type="int" default="50">
+  Maximum number of reservations to return
+</ParamField>
+
+---
+
+### GetTourReservationStatsAsync
+
+Retrieves reservation statistics for a tour.
+
+```csharp
+Task<TourReservationStatsDto> GetTourReservationStatsAsync(
+    int tourId,
+    int recentDays = 30,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="recentDays" type="int" default="30">
+  Number of days to include in statistics
+</ParamField>
+
+<ResponseField name="stats" type="TourReservationStatsDto">
+  Statistics including total reservations, amounts, and daily breakdown
+</ResponseField>
+
+---
+
+## Owner Analytics
+
+### GetOwnerEarningsAsync
+
+Calculates total earnings for a tour owner.
+
+```csharp
+Task<decimal> GetOwnerEarningsAsync(
+    int ownerUserId,
+    CancellationToken cancellationToken = default)
+```
+
+<ResponseField name="earnings" type="decimal">
+  Total earnings amount
+</ResponseField>
+
+---
+
+### GetOwnerTourStatsAsync
+
+Retrieves tour statistics for an owner.
+
+```csharp
+Task<(int TotalServices, int RecentServices)> GetOwnerTourStatsAsync(
+    int ownerUserId,
+    int recentDays = 7,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="recentDays" type="int" default="7">
+  Number of days to consider as "recent"
+</ParamField>
+
+<ResponseField name="totalServices" type="int">
+  Total number of tours owned
+</ResponseField>
+
+<ResponseField name="recentServices" type="int">
+  Number of tours created in the recent period
+</ResponseField>
+
+---
+
+## Best Practices
+
+<Note>
+  **Transaction Handling**: Many operations (especially deletes and upserts) use database transactions. Ensure proper error handling to avoid partial updates.
+</Note>
+
+<Info>
+  **Cancellation Tokens**: All async methods support cancellation tokens for graceful shutdown and request cancellation.
+</Info>
+
+<Warning>
+  **Data Integrity**: When updating ticket types or extras, be aware that existing reservations reference these entities. Consider the impact before making changes.
+</Warning>

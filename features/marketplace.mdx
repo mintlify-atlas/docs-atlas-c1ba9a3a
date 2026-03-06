@@ -1,0 +1,371 @@
+---
+title: Tour Marketplace
+description: Discover how AndanDo's tour marketplace connects travelers with unique experiences through a rich, interactive catalog
+icon: store
+---
+
+## Overview
+
+AndanDo's marketplace is the central hub where travelers discover and book tours, activities, and experiences. Built with Blazor Server, the marketplace provides a dynamic, real-time browsing experience with advanced filtering, search, and pricing transparency.
+
+<CardGroup cols={2}>
+  <Card title="Real-time Updates" icon="bolt">
+    Server-side rendering ensures users always see current availability and pricing
+  </Card>
+  <Card title="Rich Media" icon="image">
+    High-quality images and detailed descriptions for each tour
+  </Card>
+  <Card title="Smart Filtering" icon="filter">
+    Filter by price, duration, location, and availability
+  </Card>
+  <Card title="Rating System" icon="star">
+    Verified reviews and ratings from real customers
+  </Card>
+</CardGroup>
+
+## Marketplace Architecture
+
+The marketplace leverages a sophisticated data pipeline to deliver up-to-date tour information:
+
+```csharp
+public async Task<IReadOnlyList<TourMarketplaceItemDto>> GetToursForMarketplaceAsync(
+    CancellationToken cancellationToken = default)
+{
+    await using var conn = new SqlConnection(_connectionString);
+    await conn.OpenAsync(cancellationToken);
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = "sp_Tour_ListMarketplace";
+    cmd.CommandType = CommandType.StoredProcedure;
+
+    // Process results with ticket types and ratings...
+}
+```
+
+### Data Model
+
+Each marketplace item includes comprehensive tour information:
+
+<CodeGroup>
+```csharp TourMarketplaceItemDto
+public record TourMarketplaceItemDto(
+    int TourId,
+    string Title,
+    string LocationLabel,
+    string? FirstImageUrl,
+    string? DurationLabel,
+    decimal? FromPrice,
+    decimal? MaxPrice,
+    IReadOnlyList<TourTicketTypeSummaryDto> TicketTypes,
+    double? AvgRating,
+    int RatingCount
+);
+```
+
+```csharp TourTicketTypeSummaryDto
+public record TourTicketTypeSummaryDto(
+    int TourId,
+    string Name,
+    decimal? Price,
+    string CurrencyCode,
+    int SortOrder,
+    DateTime? VentaInicioUtc,
+    DateTime? VentaFinUtc,
+    bool IsActive,
+    int? CapacidadPorTipo
+);
+```
+</CodeGroup>
+
+## User Interface Features
+
+### Tour Cards
+
+The marketplace displays tours in an interactive card layout with hover effects and instant navigation:
+
+```razor Marketplace.razor
+<div class="mp-card" @onclick="() => { if (!card.DisableNavigation) GoToTourDetails(tour.TourId); }">
+    <div class="mp-card__image-wrap">
+        @if (card.IsUpcoming)
+        {
+            <div class="mp-card__upcoming-badge">
+                <span>Próximamente</span>
+            </div>
+        }
+        else
+        {
+            <img src="@imgSrc" alt="@tour.Title" />
+        }
+        
+        <button type="button" class="mp-card__fav" @onclick="() => ToggleLikeAsync(card)">
+            <svg class="fav-svg"><!-- Heart icon --></svg>
+        </button>
+    </div>
+    
+    <div class="mp-card__body">
+        <div class="mp-card__location">@tour.LocationLabel</div>
+        <div class="mp-card__title">@tour.Title</div>
+        <div class="mp-card__rating">@GetRatingText(tour)</div>
+        <div class="mp-card__footer">
+            <div class="mp-card__price-val">@card.PriceDisplay</div>
+            <button type="button" class="mp-go-btn">Ver</button>
+        </div>
+    </div>
+</div>
+```
+
+### Filter Chips
+
+Users can quickly filter tours using interactive chips:
+
+<Steps>
+  <Step title="Duration Filters">
+    Filter by short duration (hours/minutes) or long duration (days/weeks)
+  </Step>
+  <Step title="Price Ranges">
+    Economic (under RD$3,000) or Premium (over RD$3,000) options
+  </Step>
+  <Step title="Availability Status">
+    Show only upcoming tours or currently available experiences
+  </Step>
+</Steps>
+
+```razor Filter Implementation
+<button class="mp-chip @(_durationFilter == "short" ? "active" : "")"
+        type="button"
+        @onclick="@(() => { _durationFilter = "short"; _currentPage = 1; })">
+    <svg><!-- Clock icon --></svg>
+    Corta duración
+</button>
+
+<button class="mp-chip @(_priceFilter == "low" ? "active" : "")"
+        type="button"
+        @onclick="@(() => { _priceFilter = "low"; _currentPage = 1; })">
+    <svg><!-- Dollar icon --></svg>
+    Económico
+</button>
+```
+
+## Dynamic Pricing Display
+
+The marketplace intelligently displays pricing based on available ticket types:
+
+```csharp Price Calculation
+string? priceDisplay = null;
+if (tour.TicketTypes != null && tour.TicketTypes.Any())
+{
+    var activeTickets = tour.TicketTypes
+        .Where(t => t.IsActive && t.Price.HasValue)
+        .ToList();
+    
+    if (activeTickets.Any())
+    {
+        var availableTickets = activeTickets
+            .Where(t => (!t.VentaInicioUtc.HasValue || t.VentaInicioUtc <= now) 
+                     && (!t.VentaFinUtc.HasValue || t.VentaFinUtc >= now))
+            .ToList();
+
+        if (availableTickets.Any())
+        {
+            var minPrice = availableTickets.Min(t => t.Price.Value);
+            priceDisplay = $"Desde: {FormatDop(minPrice)}";
+        }
+        else
+        {
+            // Check if any future tickets exist
+            if (activeTickets.Any(t => t.VentaInicioUtc.HasValue && t.VentaInicioUtc > now))
+            {
+                priceDisplay = "Próximamente";
+            }
+        }
+    }
+}
+```
+
+<Note>
+The marketplace automatically hides tours with "Status = I" (Inactive) and respects visibility windows configured by tour operators.
+</Note>
+
+## Pagination
+
+The marketplace implements smart pagination with 12 tours per page:
+
+```csharp Pagination Logic
+private const int PageSize = 12;
+private int _currentPage = 1;
+
+private IEnumerable<TourCardViewModel> PagedFilteredTours =>
+    FilteredTours.Skip((_currentPage - 1) * PageSize).Take(PageSize);
+
+private int TotalFilteredPages => 
+    Math.Max(1, (int)Math.Ceiling((double)FilteredTours.Count() / PageSize));
+```
+
+### Pagination Controls
+
+```razor
+<div class="mp-pagination">
+    <button class="mp-page-btn" disabled="@(!CanGoPrev)" @onclick="PrevPage">
+        <svg><!-- Left arrow --></svg>
+    </button>
+    
+    @foreach (var pageNum in GetPageNumbers())
+    {
+        @if (pageNum == -1)
+        {
+            <span class="mp-page-dots">&hellip;</span>
+        }
+        else
+        {
+            <button class="mp-page-btn @(pageNum == _currentPage ? "active" : "")"
+                    @onclick="() => GoToPage(pageNum)">@pageNum</button>
+        }
+    }
+    
+    <button class="mp-page-btn" disabled="@(!CanGoNext)" @onclick="NextPage">
+        <svg><!-- Right arrow --></svg>
+    </button>
+</div>
+```
+
+## Sorting Options
+
+Users can sort tours by multiple criteria:
+
+```csharp Sorting Implementation
+private IEnumerable<TourCardViewModel> FilteredTours => Tours
+    .Where(c => /* filter logic */)
+    .OrderBy(c => _sortOrder switch
+    {
+        "priceLow"  => c.Tour.FromPrice ?? decimal.MaxValue,
+        "priceHigh" => -(c.Tour.FromPrice ?? 0m),
+        _           => 0m
+    });
+```
+
+<Warning>
+Sorting occurs in-memory on the server. For large datasets (>1000 tours), consider implementing database-level sorting.
+</Warning>
+
+## Like/Favorite System
+
+Users can save tours to their favorites:
+
+```csharp Like Toggle
+private async Task ToggleLikeAsync(TourCardViewModel card)
+{
+    if (!Session.IsAuthenticated || Session.Current is null)
+    {
+        await ShowLikeToastAsync("Inicia sesión para dar like.", card.Tour.TourId);
+        return;
+    }
+
+    _togglingLikes.Add(card.Tour.TourId);
+    try
+    {
+        if (IsLiked(card.Tour.TourId))
+        {
+            await PostLikeService.RemoveLikeAsync(Session.Current.UserId, card.Tour.TourId);
+            _likedTours.Remove(card.Tour.TourId);
+        }
+        else
+        {
+            await PostLikeService.AddLikeAsync(Session.Current.UserId, card.Tour.TourId);
+            _likedTours.Add(card.Tour.TourId);
+        }
+    }
+    finally
+    {
+        _togglingLikes.Remove(card.Tour.TourId);
+        await InvokeAsync(StateHasChanged);
+    }
+}
+```
+
+## Mobile Experience
+
+The marketplace adapts for mobile devices with a simplified card layout:
+
+```css Mobile Responsive
+@media (max-width: 640px) {
+    .mp-hero { padding: 30px 0 24px; }
+    .mp-grid { 
+        grid-template-columns: 1fr 1fr; 
+        gap: 14px; 
+    }
+}
+
+@media (max-width: 420px) {
+    .mp-grid { grid-template-columns: 1fr; }
+}
+```
+
+<Info>
+The mobile layout uses a 2-column grid on tablets and single-column on phones for optimal touch interaction.
+</Info>
+
+## Tour Visibility Logic
+
+Tours have sophisticated visibility controls:
+
+```csharp Visibility Logic
+var vis = await TourService.GetTourVisibilityAsync(tour.TourId);
+start = vis.StartDate;
+end = vis.EndDate;
+muestra = vis.MuestraInstantanea;
+
+if (string.Equals(vis.Status, "I", StringComparison.OrdinalIgnoreCase))
+{
+    continue; // Skip inactive tours
+}
+
+if (start.HasValue)
+{
+    var cutoff = end ?? start;
+    if (now > cutoff)
+    {
+        continue; // Skip expired tours
+    }
+
+    if (!muestra && start.Value > now.AddDays(3))
+    {
+        continue; // Hide tours starting >3 days in future unless "muestra" flag is set
+    }
+}
+
+var isUpcoming = !muestra && start.HasValue && start.Value > now;
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Performance" icon="gauge-high">
+    - Implement stored procedures for complex queries
+    - Use async/await throughout the data pipeline
+    - Cache tour images with CDN
+  </Card>
+  
+  <Card title="User Experience" icon="users">
+    - Show loading states during data fetches
+    - Preserve filter state in query parameters
+    - Implement optimistic UI for likes
+  </Card>
+  
+  <Card title="Data Integrity" icon="shield">
+    - Validate ticket availability before display
+    - Handle concurrent like/unlike operations
+    - Respect tour visibility windows
+  </Card>
+  
+  <Card title="Accessibility" icon="universal-access">
+    - Use semantic HTML in card components
+    - Provide alt text for all tour images
+    - Ensure keyboard navigation works
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Explore Search & Filters" icon="magnifying-glass" href="/features/search-and-filters">
+  Learn how AndanDo's advanced search helps users find the perfect tour
+</Card>

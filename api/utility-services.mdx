@@ -1,0 +1,753 @@
+---
+title: 'Utility Services API'
+description: 'Reviews, likes, currency conversion, and supporting services'
+icon: 'wrench'
+---
+
+## Overview
+
+Utility services provide supporting functionality for the AndanDo platform including review management, like/favorite system, and currency conversion.
+
+---
+
+## ReviewService
+
+### Overview
+
+Manages service reviews and ratings for tours.
+
+```csharp
+public interface IReviewService
+```
+
+Location: `~/workspace/source/AndanDo/Services/Utility/ReviewService.cs`
+
+---
+
+### AddReviewAsync
+
+Adds a review for a tour service.
+
+```csharp
+Task AddReviewAsync(
+    int serviceId,
+    int userId,
+    int rating,
+    string comment,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="serviceId" type="int" required>
+  The tour/service ID being reviewed
+</ParamField>
+
+<ParamField path="userId" type="int" required>
+  User ID submitting the review
+</ParamField>
+
+<ParamField path="rating" type="int" required>
+  Rating value (1-5 stars)
+</ParamField>
+
+<ParamField path="comment" type="string" required>
+  Review comment text (max 2000 characters)
+</ParamField>
+
+<CodeGroup>
+```csharp Example
+try
+{
+    await reviewService.AddReviewAsync(
+        serviceId: 42,
+        userId: 123,
+        rating: 5,
+        comment: "Amazing tour! The guide was knowledgeable and the views were breathtaking."
+    );
+    
+    Console.WriteLine("Review submitted successfully");
+}
+catch (ArgumentException ex)
+{
+    Console.WriteLine($"Validation error: {ex.Message}");
+}
+```
+</CodeGroup>
+
+<Warning>
+  **Validation**: The method validates:
+  - `serviceId` must be greater than 0
+  - `userId` must be greater than 0
+  - `rating` must be between 1 and 5
+  - `comment` must not be empty or whitespace
+  
+  Throws `ArgumentException` or `ArgumentOutOfRangeException` if validation fails.
+</Warning>
+
+<Note>
+  Reviews are automatically set as visible (`EsVisible = true`) and timestamped with UTC time.
+</Note>
+
+---
+
+### GetReviewsAsync
+
+Retrieves visible reviews for a service.
+
+```csharp
+Task<IReadOnlyList<ServiceReviewDto>> GetReviewsAsync(
+    int serviceId,
+    int top = 50,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="serviceId" type="int" required>
+  The tour/service ID
+</ParamField>
+
+<ParamField path="top" type="int" default="50">
+  Maximum number of reviews to return
+</ParamField>
+
+<ResponseField name="reviews" type="IReadOnlyList<ServiceReviewDto>">
+  List of reviews ordered by creation date (most recent first)
+  
+  <Expandable title="ServiceReviewDto properties">
+    - `ReviewId` (int) - Review identifier
+    - `ServiceId` (int) - Tour/service ID
+    - `UsuarioId` (int) - User ID of reviewer
+    - `Rating` (int) - Star rating (1-5)
+    - `Comentario` (string) - Review comment
+    - `EsVisible` (bool) - Visibility flag
+    - `FechaCreacion` (DateTime?) - Creation timestamp
+    - `FechaEdicion` (DateTime?) - Last edit timestamp
+    - `Nombre` (string?) - Reviewer first name
+    - `Apellido` (string?) - Reviewer last name
+    - `FotoPerfilUrl` (string?) - Reviewer profile photo URL
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var reviews = await reviewService.GetReviewsAsync(
+    serviceId: 42,
+    top: 10
+);
+
+foreach (var review in reviews)
+{
+    var stars = new string('⭐', review.Rating);
+    Console.WriteLine($"{stars} - {review.Nombre} {review.Apellido}");
+    Console.WriteLine($"{review.Comentario}");
+    Console.WriteLine($"Posted: {review.FechaCreacion:g}");
+    Console.WriteLine();
+}
+```
+</CodeGroup>
+
+<Info>
+  Only reviews marked as visible (`EsVisible = true`) are returned. This allows moderation of inappropriate content.
+</Info>
+
+---
+
+### GetOwnerRatingAsync
+
+Calculates aggregate rating statistics for all tours owned by a user.
+
+```csharp
+Task<(double? AvgRating, int RatingCount)> GetOwnerRatingAsync(
+    int ownerUserId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="ownerUserId" type="int" required>
+  The owner's user ID
+</ParamField>
+
+<ResponseField name="avgRating" type="double?">
+  Average rating across all tours (null if no ratings)
+</ResponseField>
+
+<ResponseField name="ratingCount" type="int">
+  Total number of ratings received
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var (avgRating, count) = await reviewService.GetOwnerRatingAsync(
+    ownerUserId: 123
+);
+
+if (avgRating.HasValue)
+{
+    Console.WriteLine($"Host Rating: {avgRating.Value:F2} ⭐ ({count} reviews)");
+}
+else
+{
+    Console.WriteLine("No reviews yet");
+}
+```
+</CodeGroup>
+
+---
+
+## PostLikeService
+
+### Overview
+
+Manages user likes/favorites for tours.
+
+```csharp
+public interface IPostLikeService
+```
+
+Location: `~/workspace/source/AndanDo/Services/Utility/PostLikeService.cs`
+
+---
+
+### HasUserLikedAsync
+
+Checks if a user has liked a specific tour.
+
+```csharp
+Task<bool> HasUserLikedAsync(
+    int userId,
+    int postId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID to check
+</ParamField>
+
+<ParamField path="postId" type="int" required>
+  Tour/post ID to check
+</ParamField>
+
+<ResponseField name="hasLiked" type="bool">
+  Returns `true` if user has liked the tour, `false` otherwise
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+bool hasLiked = await postLikeService.HasUserLikedAsync(
+    userId: 123,
+    postId: 42
+);
+
+var buttonText = hasLiked ? "❤️ Liked" : "🤍 Like";
+```
+</CodeGroup>
+
+<Info>
+  Returns `false` if either `userId` or `postId` is invalid (less than or equal to 0).
+</Info>
+
+---
+
+### AddLikeAsync
+
+Adds a like for a tour.
+
+```csharp
+Task AddLikeAsync(
+    int userId,
+    int postId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID adding the like
+</ParamField>
+
+<ParamField path="postId" type="int" required>
+  Tour/post ID to like
+</ParamField>
+
+<CodeGroup>
+```csharp Example
+try
+{
+    await postLikeService.AddLikeAsync(
+        userId: 123,
+        postId: 42
+    );
+    
+    Console.WriteLine("Tour added to favorites");
+}
+catch (ArgumentException ex)
+{
+    Console.WriteLine($"Invalid input: {ex.Message}");
+}
+```
+</CodeGroup>
+
+<Note>
+  The method is idempotent - if the user has already liked the tour, it won't create a duplicate entry.
+</Note>
+
+---
+
+### RemoveLikeAsync
+
+Removes a like from a tour.
+
+```csharp
+Task RemoveLikeAsync(
+    int userId,
+    int postId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID removing the like
+</ParamField>
+
+<ParamField path="postId" type="int" required>
+  Tour/post ID to unlike
+</ParamField>
+
+<CodeGroup>
+```csharp Toggle Like Example
+public async Task ToggleLikeAsync(int userId, int postId)
+{
+    bool hasLiked = await postLikeService.HasUserLikedAsync(userId, postId);
+    
+    if (hasLiked)
+    {
+        await postLikeService.RemoveLikeAsync(userId, postId);
+        Console.WriteLine("Removed from favorites");
+    }
+    else
+    {
+        await postLikeService.AddLikeAsync(userId, postId);
+        Console.WriteLine("Added to favorites");
+    }
+}
+```
+</CodeGroup>
+
+---
+
+### GetUserLikedToursAsync
+
+Retrieves all tours liked by a user.
+
+```csharp
+Task<IReadOnlyList<LikedTourSummaryDto>> GetUserLikedToursAsync(
+    int userId,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="userId" type="int" required>
+  User ID
+</ParamField>
+
+<ResponseField name="likedTours" type="IReadOnlyList<LikedTourSummaryDto>">
+  List of liked tours with summary information
+  
+  <Expandable title="LikedTourSummaryDto properties">
+    - `TourId` (int) - Tour identifier
+    - `Title` (string) - Tour title
+    - `LocationLabel` (string) - Location
+    - `FirstImageUrl` (string?) - First image URL
+    - `DurationLabel` (string?) - Duration text
+    - `FromPrice` (decimal?) - Starting price
+    - `CurrencyCode` (string) - Currency code
+    - `LikedAt` (DateTime?) - When the tour was liked
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var favorites = await postLikeService.GetUserLikedToursAsync(
+    userId: 123
+);
+
+Console.WriteLine($"You have {favorites.Count} favorite tours:");
+
+foreach (var tour in favorites)
+{
+    Console.WriteLine($"- {tour.Title} ({tour.LocationLabel})");
+    if (tour.FromPrice.HasValue)
+    {
+        Console.WriteLine($"  From {tour.FromPrice.Value:C} {tour.CurrencyCode}");
+    }
+}
+```
+</CodeGroup>
+
+<Info>
+  Results are ordered by liked date (most recent first) if the `CreatedAt` or `FechaLike` column exists, otherwise ordered by title.
+</Info>
+
+---
+
+### GetOwnerLikeStatsAsync
+
+Retrieves like statistics for all tours owned by a user.
+
+```csharp
+Task<(int TotalLikes, int RecentLikes)> GetOwnerLikeStatsAsync(
+    int ownerUserId,
+    int recentDays = 7,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="ownerUserId" type="int" required>
+  Owner's user ID
+</ParamField>
+
+<ParamField path="recentDays" type="int" default="7">
+  Number of days to consider as "recent"
+</ParamField>
+
+<ResponseField name="totalLikes" type="int">
+  Total number of likes across all owner's tours
+</ResponseField>
+
+<ResponseField name="recentLikes" type="int">
+  Number of likes received in the recent period
+</ResponseField>
+
+<CodeGroup>
+```csharp Example
+var (total, recent) = await postLikeService.GetOwnerLikeStatsAsync(
+    ownerUserId: 123,
+    recentDays: 30
+);
+
+Console.WriteLine($"Total Favorites: {total}");
+Console.WriteLine($"New in last 30 days: {recent}");
+```
+</CodeGroup>
+
+<Note>
+  Recent likes count requires the `CreatedAt` column in the `PostLikes` table. If the column doesn't exist, `recentLikes` will be 0.
+</Note>
+
+---
+
+## CurrencyConversionService
+
+### Overview
+
+Provides real-time currency conversion using the ExchangeRate API.
+
+```csharp
+public interface ICurrencyConversionService
+```
+
+Location: `~/workspace/source/AndanDo/Services/Utility/CurrencyConversionService.cs`
+
+---
+
+### ConvertAsync
+
+Converts an amount from one currency to another.
+
+```csharp
+Task<decimal> ConvertAsync(
+    decimal amount,
+    string fromCurrency,
+    string toCurrency,
+    CancellationToken cancellationToken = default)
+```
+
+<ParamField path="amount" type="decimal" required>
+  Amount to convert (must be non-negative)
+</ParamField>
+
+<ParamField path="fromCurrency" type="string" required>
+  Source currency code (e.g., "USD", "EUR")
+</ParamField>
+
+<ParamField path="toCurrency" type="string" required>
+  Target currency code
+</ParamField>
+
+<ResponseField name="convertedAmount" type="decimal">
+  Converted amount in target currency
+</ResponseField>
+
+<CodeGroup>
+```csharp Basic Example
+// Convert 100 USD to DOP
+var dopAmount = await currencyService.ConvertAsync(
+    amount: 100m,
+    fromCurrency: "USD",
+    toCurrency: "DOP"
+);
+
+Console.WriteLine($"$100 USD = ${dopAmount:F2} DOP");
+```
+
+```csharp Multi-Currency Pricing
+public async Task<Dictionary<string, decimal>> GetPriceInMultipleCurrenciesAsync(
+    decimal basePrice,
+    string baseCurrency,
+    string[] targetCurrencies)
+{
+    var prices = new Dictionary<string, decimal>
+    {
+        [baseCurrency] = basePrice
+    };
+    
+    foreach (var currency in targetCurrencies)
+    {
+        if (currency != baseCurrency)
+        {
+            prices[currency] = await currencyService.ConvertAsync(
+                basePrice,
+                baseCurrency,
+                currency
+            );
+        }
+    }
+    
+    return prices;
+}
+
+// Usage
+var prices = await GetPriceInMultipleCurrenciesAsync(
+    basePrice: 150m,
+    baseCurrency: "USD",
+    targetCurrencies: new[] { "USD", "EUR", "GBP", "CAD" }
+);
+
+foreach (var (currency, price) in prices)
+{
+    Console.WriteLine($"{price:F2} {currency}");
+}
+```
+</CodeGroup>
+
+<Info>
+  **API**: Uses the free [ExchangeRate-API](https://www.exchangerate-api.com/) service at `https://open.er-api.com/v6/latest/`
+  
+  No API key required for basic usage.
+</Info>
+
+<Note>
+  If source and target currencies are the same, the method returns the original amount without making an API call.
+</Note>
+
+<Warning>
+  **Validation**: The method validates:
+  - `amount` must be non-negative
+  - `fromCurrency` must not be empty
+  - `toCurrency` must not be empty
+  - Target currency must exist in API response
+  
+  Throws `ArgumentOutOfRangeException`, `ArgumentException`, or `InvalidOperationException` if validation fails.
+</Warning>
+
+---
+
+### Error Handling
+
+<CodeGroup>
+```csharp With Error Handling
+public async Task<decimal?> SafeConvertAsync(
+    decimal amount,
+    string fromCurrency,
+    string toCurrency)
+{
+    try
+    {
+        return await currencyService.ConvertAsync(
+            amount,
+            fromCurrency,
+            toCurrency
+        );
+    }
+    catch (ArgumentOutOfRangeException ex)
+    {
+        Console.WriteLine($"Invalid amount: {ex.Message}");
+        return null;
+    }
+    catch (ArgumentException ex)
+    {
+        Console.WriteLine($"Invalid currency code: {ex.Message}");
+        return null;
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.WriteLine($"Conversion failed: {ex.Message}");
+        return null;
+    }
+    catch (HttpRequestException ex)
+    {
+        Console.WriteLine($"Network error: {ex.Message}");
+        return null;
+    }
+}
+```
+</CodeGroup>
+
+---
+
+### Caching Recommendations
+
+<Info>
+  **Performance**: Currency rates change frequently but not constantly. Consider implementing caching:
+  
+  - Cache rates for 1-6 hours
+  - Use `IMemoryCache` or distributed cache
+  - Refresh cache in background
+  - Provide stale data if API is unavailable
+</Info>
+
+<CodeGroup>
+```csharp Cached Conversion Example
+public class CachedCurrencyService
+{
+    private readonly ICurrencyConversionService _currencyService;
+    private readonly IMemoryCache _cache;
+    private const int CacheMinutes = 60;
+    
+    public async Task<decimal> ConvertWithCacheAsync(
+        decimal amount,
+        string fromCurrency,
+        string toCurrency)
+    {
+        var cacheKey = $"rate_{fromCurrency}_{toCurrency}";
+        
+        if (!_cache.TryGetValue<decimal>(cacheKey, out var rate))
+        {
+            // Get rate by converting 1 unit
+            rate = await _currencyService.ConvertAsync(
+                1m,
+                fromCurrency,
+                toCurrency
+            );
+            
+            _cache.Set(cacheKey, rate, TimeSpan.FromMinutes(CacheMinutes));
+        }
+        
+        return amount * rate;
+    }
+}
+```
+</CodeGroup>
+
+---
+
+## Common Use Cases
+
+### Display Tour with Reviews and Likes
+
+```csharp
+public async Task<TourCardViewModel> GetTourCardAsync(
+    int tourId,
+    int? currentUserId = null)
+{
+    var tour = await tourService.GetTourFullByIdAsync(tourId);
+    if (tour == null) return null;
+    
+    // Get reviews
+    var reviews = await reviewService.GetReviewsAsync(tourId, top: 5);
+    var avgRating = reviews.Any() 
+        ? reviews.Average(r => r.Rating) 
+        : (double?)null;
+    
+    // Get like status
+    bool isLiked = false;
+    if (currentUserId.HasValue)
+    {
+        isLiked = await postLikeService.HasUserLikedAsync(
+            currentUserId.Value,
+            tourId
+        );
+    }
+    
+    // Convert price if needed
+    decimal displayPrice = tour.TicketTypes.FirstOrDefault()?.Price ?? 0;
+    string displayCurrency = "USD";
+    
+    if (userPreferredCurrency != "USD")
+    {
+        displayPrice = await currencyService.ConvertAsync(
+            displayPrice,
+            "USD",
+            userPreferredCurrency
+        );
+        displayCurrency = userPreferredCurrency;
+    }
+    
+    return new TourCardViewModel
+    {
+        Tour = tour,
+        AverageRating = avgRating,
+        ReviewCount = reviews.Count,
+        IsLiked = isLiked,
+        DisplayPrice = displayPrice,
+        DisplayCurrency = displayCurrency
+    };
+}
+```
+
+---
+
+### Host Dashboard Stats
+
+```csharp
+public async Task<HostDashboardViewModel> GetHostStatsAsync(int userId)
+{
+    var (totalTours, recentTours) = await tourService.GetOwnerTourStatsAsync(
+        userId,
+        recentDays: 7
+    );
+    
+    var (totalLikes, recentLikes) = await postLikeService.GetOwnerLikeStatsAsync(
+        userId,
+        recentDays: 7
+    );
+    
+    var (avgRating, ratingCount) = await reviewService.GetOwnerRatingAsync(userId);
+    
+    var earnings = await tourService.GetOwnerEarningsAsync(userId);
+    
+    return new HostDashboardViewModel
+    {
+        TotalTours = totalTours,
+        NewToursThisWeek = recentTours,
+        TotalFavorites = totalLikes,
+        NewFavoritesThisWeek = recentLikes,
+        AverageRating = avgRating ?? 0,
+        TotalReviews = ratingCount,
+        TotalEarnings = earnings
+    };
+}
+```
+
+---
+
+## Configuration
+
+<CodeGroup>
+```csharp Program.cs Registration
+// Register utility services
+services.AddScoped<IReviewService, ReviewService>();
+services.AddScoped<IPostLikeService, PostLikeService>();
+
+// Currency service needs HttpClient
+services.AddHttpClient<ICurrencyConversionService, CurrencyConversionService>();
+```
+</CodeGroup>
+
+---
+
+## Best Practices
+
+<Note>
+  **Review Moderation**: Reviews are auto-visible by default. Implement a moderation system to flag and hide inappropriate content.
+</Note>
+
+<Info>
+  **Rate Limiting**: The currency conversion service makes external API calls. Implement rate limiting and caching to avoid hitting API quotas.
+</Info>
+
+<Warning>
+  **Data Integrity**: When deleting tours, ensure reviews and likes are also cleaned up. The `TourService.DeleteTourAsync` method handles this automatically.
+</Warning>

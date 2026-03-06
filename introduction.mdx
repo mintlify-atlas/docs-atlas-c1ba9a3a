@@ -1,0 +1,199 @@
+---
+title: Introduction
+description: Welcome to AndanDo - A comprehensive tour marketplace platform built with Blazor Server and .NET
+---
+
+<img
+  className="block dark:hidden"
+  src="https://www.andando.com.do/assets/img/andando_logo.png"
+  alt="AndanDo Logo"
+/>
+<img
+  className="hidden dark:block"
+  src="https://www.andando.com.do/assets/img/andando_logo.png"
+  alt="AndanDo Logo"
+/>
+
+## What is AndanDo?
+
+AndanDo is a full-featured tour marketplace platform that enables tour operators to publish, manage, and sell their tours while providing travelers with a seamless booking experience. Built with **Blazor Server** and **.NET 10**, AndanDo offers a complete end-to-end solution for the tour and services industry.
+
+<CardGroup cols={2}>
+  <Card title="For Tour Operators" icon="store">
+    Create and manage tours with detailed itineraries, ticket types, extras, and pricing. Track reservations and earnings through a comprehensive dashboard.
+  </Card>
+  <Card title="For Travelers" icon="compass">
+    Discover tours with advanced search, geolocation filtering, view detailed information, read reviews, and book with flexible payment options.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<CardGroup cols={3}>
+  <Card title="Public Marketplace" icon="shop">
+    Beautiful marketplace with tour cards displaying pricing, duration, ratings, and availability. Features a slider showcasing recent tours.
+  </Card>
+  <Card title="Advanced Search" icon="magnifying-glass">
+    Autocomplete search with geolocation support via Nominatim API. Filters persist in Base64 format with intelligent normalization.
+  </Card>
+  <Card title="Tour Management" icon="list-check">
+    Complete tour creation/editing with hero highlights, inclusions/exclusions, itinerary builder, FAQ system, and ticket type configuration.
+  </Card>
+  <Card title="Booking Flow" icon="ticket">
+    Multi-step reservation process with contact info, ticket selection, extras, and totals. All data persists in SQL Server.
+  </Card>
+  <Card title="Payment Integration" icon="credit-card">
+    PayPal integration for secure payments with support for instant bookings, quotes, and deposits.
+  </Card>
+  <Card title="Creator Dashboard" icon="chart-line">
+    Comprehensive dashboard with metrics, reservation management, invoice generation, and earnings tracking.
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+AndanDo follows a clean, service-oriented architecture:
+
+<Steps>
+  <Step title="Frontend Layer">
+    Blazor Server components in `Components/Pages` including Home, Marketplace, SearchResults, TourDetails, NewTour, Dashboard pages, and Auth flows.
+  </Step>
+  <Step title="Service Layer">
+    Domain services including `TourService` for tour management, `AuthService` for authentication with PBKDF2 hashing, and utility services for likes, reviews, currency conversion, and AI assistance.
+  </Step>
+  <Step title="Data Layer">
+    SQL Server database accessed via stored procedures for optimal performance. Uses `Microsoft.Data.SqlClient` for data access.
+  </Step>
+</Steps>
+
+### Core Services
+
+```csharp Program.cs
+// Authentication & Session
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<UserSession>();
+builder.Services.AddScoped<ProtectedLocalStorage>();
+
+// Tour Management
+builder.Services.AddScoped<ITourService, TourService>();
+
+// Payment Processing
+builder.Services.AddHttpClient<IPaypalService, PaypalService>();
+
+// Utility Services
+builder.Services.AddScoped<ICurrencyConversionService, CurrencyConversionService>();
+builder.Services.AddScoped<IPostLikeService, PostLikeService>();
+builder.Services.AddScoped<IReviewService, ReviewService>();
+builder.Services.AddHttpClient<IAssistanceTextService, AssistanceTextService>();
+```
+
+## Technology Stack
+
+<CardGroup cols={2}>
+  <Card title="Backend" icon="server">
+    - **.NET 10** - Modern web framework
+    - **Blazor Server** - Interactive web UI
+    - **SQL Server** - Relational database
+    - **Entity Framework Core** - Data access
+  </Card>
+  <Card title="Key Libraries" icon="code">
+    - **Microsoft.Data.SqlClient** - Database connectivity
+    - **System.IdentityModel.Tokens.Jwt** - JWT authentication
+    - **MailKit** - Email services
+    - **System.Drawing.Common** - Image processing
+  </Card>
+</CardGroup>
+
+## Security & Authentication
+
+AndanDo implements enterprise-grade security:
+
+<CardGroup cols={2}>
+  <Card title="Password Security" icon="lock">
+    PBKDF2 with SHA256 hashing, 100,000 iterations, 16-byte salt, and 32-byte key size for secure password storage.
+  </Card>
+  <Card title="Session Management" icon="key">
+    JWT tokens for authentication with ProtectedLocalStorage for client-side session persistence in Blazor Server.
+  </Card>
+</CardGroup>
+
+```csharp AuthService.cs
+public string HashPassword(string password)
+{
+    var salt = RandomNumberGenerator.GetBytes(Pbkdf2SaltSize);
+    var hash = Rfc2898DeriveBytes.Pbkdf2(
+        password,
+        salt,
+        Pbkdf2Iterations,
+        HashAlgorithmName.SHA256,
+        Pbkdf2KeySize);
+
+    return $"{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
+}
+```
+
+## Recent Updates
+
+<Info>
+  AndanDo is actively developed with continuous improvements and new features.
+</Info>
+
+- **Reports Dashboard** - Event selector with metrics (entries, reservations, sales) and expandable reservation tables
+- **Ticket Management** - Grouped ticket display from `TourReservation` and `TourReservationTicket` tables
+- **Invoice Generation** - HTML invoice generation using templates with "View Invoices" action menu per reservation
+- **Ticket Listing** - Display ticket codes and documents with duplicate prevention
+
+## What You'll Learn
+
+This documentation will guide you through:
+
+<CardGroup cols={2}>
+  <Card title="Getting Started" icon="rocket" href="/quickstart">
+    Quick setup guide to get AndanDo running locally in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed installation with database setup and configuration
+  </Card>
+  <Card title="Tour Management" icon="map">
+    Creating and managing tours with all features
+  </Card>
+  <Card title="Booking System" icon="calendar">
+    Understanding the multi-step booking workflow
+  </Card>
+  <Card title="Payment Integration" icon="dollar-sign">
+    Configuring PayPal and handling payments
+  </Card>
+  <Card title="Dashboard Features" icon="gauge">
+    Using the creator dashboard and reports
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+<CardGroup cols={2}>
+  <Card title="Development Tools" icon="wrench">
+    - .NET SDK 10.0 (or .NET 8.0)
+    - Visual Studio 2022+ or VS Code
+    - SQL Server or SQL Express
+  </Card>
+  <Card title="External Services" icon="cloud">
+    - Internet for geolocation (Nominatim)
+    - PayPal developer account (optional)
+    - Google Maps API key (optional)
+  </Card>
+</CardGroup>
+
+<Note>
+  If you don't have .NET 10 SDK, you can temporarily change `TargetFramework` in `AndanDo.csproj` to `net8.0`.
+</Note>
+
+## Support & Community
+
+<Warning>
+  This is a production codebase. Always replace example credentials and API keys before deploying to production.
+</Warning>
+
+Ready to get started? Head over to the [Quickstart Guide](/quickstart) to get AndanDo running in minutes!

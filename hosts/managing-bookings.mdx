@@ -1,0 +1,366 @@
+---
+title: 'Managing Reservations'
+description: 'View, edit, and manage tour reservations and bookings'
+icon: 'calendar-check'
+---
+
+## Overview
+
+The bookings page provides a comprehensive interface for managing all your tour services and their associated reservations.
+
+## Tour List View
+
+View all your published tours with key metrics and management options.
+
+### Service Cards
+
+Each tour is displayed as a card containing:
+
+<CardGroup cols={2}>
+  <Card title="Tour Information" icon="info-circle">
+    - Tour title and location
+    - Featured image
+    - Duration and pricing
+    - Start and end dates
+  </Card>
+  <Card title="Performance Metrics" icon="chart-simple">
+    - Total reservations count
+    - Total sales amount
+    - Active/inactive status
+    - Reservation status badge
+  </Card>
+</CardGroup>
+
+## Filtering & Search
+
+Use the filter bar to narrow down your tour list:
+
+```razor Components/Pages/Dashboard/MyBookings.razor:51
+<div class="bk-filters">
+    <div class="bk-search">
+        <input class="bk-search__input" 
+               placeholder="Buscar por título o ubicación..." 
+               @bind="searchText" />
+    </div>
+    
+    <div class="bk-chips">
+        <button type="button"
+                class="bk-chip @(onlyWithReservations ? "active" : "")"
+                @onclick="ToggleOnlyWithReservations">
+            Solo con reservas
+        </button>
+        
+        <button type="button"
+                class="bk-chip @(statusFilter != StatusFilter.All ? "active" : "")"
+                @onclick="ToggleStatusFilter">
+            @GetStatusFilterLabel()
+        </button>
+    </div>
+</div>
+```
+
+### Filter Options
+
+<Steps>
+  <Step title="Text Search">
+    Search by tour title or location using the search input
+  </Step>
+  
+  <Step title="Reservations Filter">
+    Toggle "Solo con reservas" to show only tours with bookings
+  </Step>
+  
+  <Step title="Status Filter">
+    Cycle through: All → Active → Inactive
+  </Step>
+</Steps>
+
+## Loading Tour Data
+
+The page loads tours owned by the current user:
+
+```csharp Services/Tour/TourService.cs:1527
+public async Task<IReadOnlyList<TourMarketplaceItemDto>> GetOwnerToursAsync(
+    int ownerUserId,
+    int topRows,
+    CancellationToken cancellationToken = default)
+{
+    var sql = $@"
+    SELECT TOP (@TopRows)
+        t.TourId,
+        t.Title,
+        t.LocationLabel,
+        t.ImageList,
+        t.Status,
+        t.CreatedAt
+    FROM {tourTable} t
+    WHERE t.OwnerUserId = @OwnerUserId
+    ORDER BY t.CreatedAt DESC";
+    
+    // Load tours with ticket types and ratings
+}
+```
+
+## Reservation Statistics
+
+For each tour, the system loads reservation statistics:
+
+```csharp Services/Tour/TourService.cs:1897
+public async Task<TourReservationStatsDto> GetTourReservationStatsAsync(
+    int tourId,
+    int recentDays = 30,
+    CancellationToken cancellationToken = default)
+{
+    var sql = $@"
+    SELECT 
+        CAST(r.CreatedAt AS date) AS DayDate,
+        COUNT(*) AS ReservationCount,
+        COALESCE(SUM(r.AmountPaid), 0) AS TotalAmount,
+        SUM(CASE WHEN r.PaymentStatus = 1 THEN 1 ELSE 0 END) AS PaidCount,
+        SUM(CASE WHEN r.PaymentStatus <> 1 THEN 1 ELSE 0 END) AS PendingCount
+    FROM {reservationTable} r
+    WHERE r.TourId = @TourId
+    GROUP BY CAST(r.CreatedAt AS date)
+    ORDER BY DayDate ASC;";
+}
+```
+
+### Statistics DTO Structure
+
+```csharp Dtos/TourDtos.cs:91
+public sealed record TourReservationStatsDto(
+    int TourId,
+    int TotalReservations,
+    decimal TotalAmount,
+    IReadOnlyList<TourReservationDayStat> Daily);
+
+public sealed record TourReservationDayStat(
+    DateTime Date,
+    int Count,
+    decimal Amount,
+    int PaidCount,
+    int PendingCount,
+    decimal PaidAmount,
+    decimal PendingAmount);
+```
+
+## Actions Menu
+
+Each tour card provides several management actions:
+
+### View Tour Details
+
+Navigate to the tour's public page:
+
+```csharp
+private void GoToMenu(int tourId)
+{
+    Navigation.NavigateTo($"/tour/{tourId}");
+}
+```
+
+### Generate Private URL
+
+Create a private access URL for hidden tours:
+
+<Info>
+Private URLs allow access to tours that are not visible on the marketplace.
+</Info>
+
+```csharp
+private async Task OpenPrivateLink(TourBookingViewModel item)
+{
+    if (!item.IsOwner)
+    {
+        ShowModal("Error", "Solo el creador puede generar la URL privada.");
+        return;
+    }
+    
+    var baseUrl = Navigation.BaseUri.TrimEnd('/');
+    _privateAccessUrl = $"{baseUrl}/tour/{item.Tour.TourId}?access=private";
+    _showPrivateLinkModal = true;
+}
+```
+
+### Edit Service
+
+Navigate to the tour editor:
+
+```csharp
+private void EditService(TourBookingViewModel item)
+{
+    if (!item.IsOwner)
+    {
+        ShowModal("Error", "Solo el creador puede editar este servicio.");
+        return;
+    }
+    
+    Navigation.NavigateTo($"/tour/edit/{item.Tour.TourId}");
+}
+```
+
+### Delete Service
+
+Remove a tour from the system:
+
+<Warning>
+Deletion is prevented if the tour has existing reservations.
+</Warning>
+
+```csharp Services/Tour/TourService.cs:479
+public async Task DeleteTourAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+{
+    // Check for existing reservations
+    var countSql = $"SELECT COUNT(1) FROM {reservationTable} WHERE TourId = @TourId;";
+    var count = await ExecuteScalarAsync<int>(countSql, new { TourId = tourId });
+    
+    if (count > 0)
+    {
+        throw new InvalidOperationException(
+            "Este servicio tiene reservas/ventas y no puede eliminarse."
+        );
+    }
+    
+    // Delete tour and related data
+    await ExecuteAsync("sp_Tour_DeleteCascade", new { TourId = tourId });
+}
+```
+
+### View Sales Statistics
+
+Open a modal with detailed sales analytics:
+
+<Steps>
+  <Step title="Open Modal">
+    Click "Ver ventas" to open the statistics modal
+  </Step>
+  
+  <Step title="View Summary">
+    See total reservations, amount, and analysis period
+  </Step>
+  
+  <Step title="Review Chart">
+    View a chart of daily sales and reservation trends
+  </Step>
+  
+  <Step title="Check Recent Bookings">
+    Scroll through recent reservation details
+  </Step>
+</Steps>
+
+## Sales Modal
+
+The sales modal displays comprehensive analytics:
+
+### Summary Cards
+
+<CardGroup cols={3}>
+  <Card title="Total Reservations" icon="calendar">
+    Total number of reservations across all time
+  </Card>
+  <Card title="Total Revenue" icon="sack-dollar">
+    Accumulated amount from all reservations
+  </Card>
+  <Card title="Analysis Period" icon="clock">
+    Number of days in the analysis window (default: 30)
+  </Card>
+</CardGroup>
+
+### Sales Chart
+
+The modal includes a Chart.js visualization showing:
+
+- Daily paid reservation count
+- Daily pending reservation count
+- Daily paid amounts
+- Daily pending amounts
+
+```javascript
+await JS.InvokeVoidAsync("chartHelper.renderSalesChart", 
+    "salesChart", 
+    labels, 
+    paidCounts,
+    pendingCounts,
+    paidAmounts, 
+    pendingAmounts,
+    "Reservas Pagadas", 
+    "Reservas Pendientes",
+    "Dinero Pagado",
+    "Dinero Pendiente");
+```
+
+### Recent Reservations Table
+
+View recent bookings with:
+
+| Column | Description |
+|--------|-------------|
+| **Fecha** | Travel date and time |
+| **Cliente** | Customer name and email |
+| **Cant.** | Number of tickets |
+| **Total** | Total amount |
+| **Estado** | Payment status badge |
+
+## Status Badges
+
+Reservations display badges based on their status:
+
+### Reservation Status
+
+| Status | Class | Color |
+|--------|-------|-------|
+| Con reservas | `bk-badge--success` | Orange accent |
+| Sin reservas | `bk-badge--muted` | Gray |
+
+### Tour Status
+
+```csharp
+private string GetStatusBadgeClass(string? status) => status switch
+{
+    "A" => "bk-badge--success",  // Active
+    "I" => "bk-badge--muted",    // Inactive
+    _ => "bk-badge--info"         // Other
+};
+
+private string GetStatusBadgeText(string? status) => status switch
+{
+    "A" => "Activo",
+    "I" => "Inactivo",
+    _ => "Desconocido"
+};
+```
+
+## Permissions
+
+<Warning>
+Only the tour owner can perform management actions (edit, delete, generate URLs).
+</Warning>
+
+Permission checks are performed before each action:
+
+```csharp
+public sealed class TourBookingViewModel
+{
+    public bool IsOwner => Tour.OwnerUserId == _currentUserId;
+    
+    // Disable actions if not owner
+    public bool CanEdit => IsOwner;
+    public bool CanDelete => IsOwner && ReservationCount == 0;
+}
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Dashboard Overview" icon="gauge" href="/hosts/dashboard">
+    View main dashboard and tour selector
+  </Card>
+  <Card title="Invoice Generation" icon="file-invoice" href="/hosts/invoices">
+    Learn about invoice management
+  </Card>
+  <Card title="Revenue Analytics" icon="chart-line" href="/hosts/statistics">
+    Deep dive into revenue tracking
+  </Card>
+</CardGroup>

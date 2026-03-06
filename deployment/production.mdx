@@ -1,0 +1,912 @@
+---
+title: Production Deployment
+description: Guide to deploying AndanDo to production environments
+---
+
+## Overview
+
+This guide covers deploying AndanDo to production environments, including configuration, security hardening, and hosting options.
+
+<Warning>
+  **Before deploying to production:**
+  - Replace all example credentials and API keys
+  - Use production-grade SQL Server instance
+  - Enable HTTPS with valid SSL certificates
+  - Review and harden security settings
+  - Test thoroughly in staging environment
+</Warning>
+
+## Pre-Deployment Checklist
+
+<Steps>
+  <Step title="Security Review">
+    <CardGroup cols={2}>
+      <Card title="Credentials" icon="key">
+        - [ ] Replace default JWT SecretKey
+        - [ ] Use environment variables for secrets
+        - [ ] Update SMTP credentials
+        - [ ] Switch to PayPal live credentials
+      </Card>
+      <Card title="Configuration" icon="shield">
+        - [ ] Disable `DetailedErrors` in production
+        - [ ] Set `ASPNETCORE_ENVIRONMENT` to `Production`
+        - [ ] Enable HSTS and HTTPS redirection
+        - [ ] Configure proper logging levels
+      </Card>
+    </CardGroup>
+  </Step>
+  
+  <Step title="Database Preparation">
+    - [ ] Use production SQL Server instance
+    - [ ] Create database backups and recovery plan
+    - [ ] Configure connection pooling
+    - [ ] Set up database monitoring
+    - [ ] Apply proper user permissions (principle of least privilege)
+  </Step>
+  
+  <Step title="Performance Optimization">
+    - [ ] Enable response compression
+    - [ ] Configure CDN for static assets
+    - [ ] Optimize image uploads (compression, resizing)
+    - [ ] Set up application monitoring (Application Insights, etc.)
+  </Step>
+  
+  <Step title="Testing">
+    - [ ] Load testing for expected traffic
+    - [ ] Test payment flows with live PayPal
+    - [ ] Verify email delivery
+    - [ ] Test all external API integrations
+    - [ ] Verify database backup/restore procedures
+  </Step>
+</Steps>
+
+## Production Configuration
+
+### appsettings.Production.json
+
+Create a production configuration file:
+
+```json
+{
+  "DetailedErrors": false,
+  "Logging": {
+    "LogLevel": {
+      "Default": "Warning",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  },
+  "AllowedHosts": "andando.com.do,www.andando.com.do",
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=prod-sql-server.database.windows.net;Database=AndandoDB;User Id=produser;Password=${SQL_PASSWORD};Encrypt=true;TrustServerCertificate=false;"
+  },
+  "Jwt": {
+    "Issuer": "AndanDo",
+    "Audience": "AndanDo",
+    "SecretKey": "${JWT_SECRET_KEY}",
+    "ExpirationMinutes": 120
+  },
+  "Smtp": {
+    "Host": "${SMTP_HOST}",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "${SMTP_USER}",
+    "Password": "${SMTP_PASSWORD}",
+    "FromEmail": "noreply@andando.com.do",
+    "FromName": "AndanDo"
+  },
+  "PayPal": {
+    "Mode": "live",
+    "ClientId": "${PAYPAL_CLIENT_ID}",
+    "ClientSecret": "${PAYPAL_CLIENT_SECRET}",
+    "BaseUrl": "https://api-m.paypal.com"
+  }
+}
+```
+
+<Note>
+  **Variable Substitution**: Replace `${VARIABLE_NAME}` placeholders with actual values at deployment time, or use environment variables and a configuration provider.
+</Note>
+
+### Environment Variables
+
+Store sensitive configuration in environment variables:
+
+<Tabs>
+  <Tab title="Windows Server">
+    ```powershell
+    # Set system environment variables
+    [Environment]::SetEnvironmentVariable("SQL_PASSWORD", "YourSecurePassword", "Machine")
+    [Environment]::SetEnvironmentVariable("JWT_SECRET_KEY", "your-64-character-production-secret-key-here-change-this", "Machine")
+    [Environment]::SetEnvironmentVariable("SMTP_PASSWORD", "your-smtp-password", "Machine")
+    [Environment]::SetEnvironmentVariable("PAYPAL_CLIENT_ID", "your-live-client-id", "Machine")
+    [Environment]::SetEnvironmentVariable("PAYPAL_CLIENT_SECRET", "your-live-secret", "Machine")
+    [Environment]::SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Production", "Machine")
+    ```
+  </Tab>
+  
+  <Tab title="Linux/Docker">
+    ```bash
+    # Add to /etc/environment or systemd service file
+    export SQL_PASSWORD="YourSecurePassword"
+    export JWT_SECRET_KEY="your-64-character-production-secret-key-here-change-this"
+    export SMTP_PASSWORD="your-smtp-password"
+    export PAYPAL_CLIENT_ID="your-live-client-id"
+    export PAYPAL_CLIENT_SECRET="your-live-secret"
+    export ASPNETCORE_ENVIRONMENT="Production"
+    ```
+  </Tab>
+  
+  <Tab title="Azure App Service">
+    Configure in Azure Portal:
+    
+    1. Navigate to App Service > Configuration > Application settings
+    2. Add each key-value pair:
+       - `SQL_PASSWORD`: Your database password
+       - `JWT_SECRET_KEY`: Your JWT secret
+       - `SMTP_PASSWORD`: SMTP password
+       - `PAYPAL_CLIENT_ID`: PayPal live client ID
+       - `PAYPAL_CLIENT_SECRET`: PayPal live secret
+       - `ASPNETCORE_ENVIRONMENT`: Production
+    3. Click Save and restart the app
+  </Tab>
+</Tabs>
+
+## Build for Production
+
+### Publish the Application
+
+<Steps>
+  <Step title="Clean Previous Builds">
+    ```bash
+    dotnet clean --configuration Release
+    ```
+  </Step>
+  
+  <Step title="Publish Release Build">
+    <Tabs>
+      <Tab title="Framework-Dependent">
+        ```bash
+        dotnet publish -c Release -o ./publish
+        ```
+        
+        Requires .NET runtime on target server. Smaller deployment size.
+      </Tab>
+      
+      <Tab title="Self-Contained (Windows)">
+        ```bash
+        dotnet publish -c Release -r win-x64 --self-contained -o ./publish
+        ```
+        
+        Includes .NET runtime. Larger but no runtime installation needed.
+      </Tab>
+      
+      <Tab title="Self-Contained (Linux)">
+        ```bash
+        dotnet publish -c Release -r linux-x64 --self-contained -o ./publish
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  
+  <Step title="Verify Output">
+    Check the `./publish` folder contains:
+    - `AndanDo.dll` (main assembly)
+    - `appsettings.json` and `appsettings.Production.json`
+    - `wwwroot/` directory with static assets
+    - All dependency DLLs
+  </Step>
+</Steps>
+
+### Optimize Published Output
+
+<AccordionGroup>
+  <Accordion title="Enable ReadyToRun (R2R) Compilation">
+    Add to `AndanDo.csproj` for faster startup:
+    
+    ```xml
+    <PropertyGroup>
+      <PublishReadyToRun>true</PublishReadyToRun>
+      <PublishTrimmed>false</PublishTrimmed>
+    </PropertyGroup>
+    ```
+    
+    <Warning>
+      Do not enable trimming for Blazor Server apps - it can break reflection-dependent features.
+    </Warning>
+  </Accordion>
+  
+  <Accordion title="Compress Static Assets">
+    Enable response compression in `Program.cs`:
+    
+    ```csharp
+    builder.Services.AddResponseCompression(options =>
+    {
+        options.EnableForHttps = true;
+    });
+    
+    var app = builder.Build();
+    app.UseResponseCompression();
+    ```
+  </Accordion>
+  
+  <Accordion title="Configure Kestrel for Production">
+    Add Kestrel configuration for production in `appsettings.Production.json`:
+    
+    ```json
+    {
+      "Kestrel": {
+        "Limits": {
+          "MaxConcurrentConnections": 100,
+          "MaxConcurrentUpgradedConnections": 100,
+          "MaxRequestBodySize": 52428800,
+          "RequestHeadersTimeout": "00:01:00"
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Deployment Options
+
+### Option 1: Windows Server with IIS
+
+<Steps>
+  <Step title="Install Prerequisites">
+    On Windows Server:
+    
+    1. Install IIS via Server Manager
+    2. Install .NET 10.0 Hosting Bundle from [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0)
+    3. Restart IIS: `net stop was /y && net start w3svc`
+  </Step>
+  
+  <Step title="Create IIS Site">
+    In IIS Manager:
+    
+    1. Create new Application Pool:
+       - Name: `AndanDoAppPool`
+       - .NET CLR version: `No Managed Code`
+       - Managed pipeline mode: `Integrated`
+    
+    2. Create new Website:
+       - Site name: `AndanDo`
+       - Application pool: `AndanDoAppPool`
+       - Physical path: `C:\inetpub\andando`
+       - Binding: HTTPS on port 443 with SSL certificate
+  </Step>
+  
+  <Step title="Deploy Files">
+    Copy published files to `C:\inetpub\andando`:
+    
+    ```powershell
+    xcopy /E /I /Y .\publish\* C:\inetpub\andando\
+    ```
+  </Step>
+  
+  <Step title="Configure web.config">
+    IIS requires a `web.config` file (auto-generated during publish):
+    
+    ```xml
+    <?xml version="1.0" encoding="utf-8"?>
+    <configuration>
+      <location path="." inheritInChildApplications="false">
+        <system.webServer>
+          <handlers>
+            <add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" />
+          </handlers>
+          <aspNetCore processPath="dotnet" 
+                      arguments=".\AndanDo.dll" 
+                      stdoutLogEnabled="false" 
+                      stdoutLogFile=".\logs\stdout" 
+                      hostingModel="inprocess">
+            <environmentVariables>
+              <environmentVariable name="ASPNETCORE_ENVIRONMENT" value="Production" />
+            </environmentVariables>
+          </aspNetCore>
+        </system.webServer>
+      </location>
+    </configuration>
+    ```
+  </Step>
+  
+  <Step title="Configure SSL Certificate">
+    In IIS Manager:
+    
+    1. Select the AndanDo site
+    2. Bindings > Add > HTTPS (port 443)
+    3. Select your SSL certificate (e.g., from Let's Encrypt or commercial CA)
+    4. Save and restart the site
+  </Step>
+  
+  <Step title="Set Permissions">
+    Grant IIS_IUSRS permissions to:
+    - Application folder: Read & Execute
+    - `wwwroot/uploads`: Modify (for file uploads)
+    
+    ```powershell
+    icacls C:\inetpub\andando /grant "IIS_IUSRS:(OI)(CI)(RX)"
+    icacls C:\inetpub\andando\wwwroot\uploads /grant "IIS_IUSRS:(OI)(CI)(M)"
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  **Application Insights**: Consider adding Application Insights for monitoring in production:
+  
+  ```bash
+  dotnet add package Microsoft.ApplicationInsights.AspNetCore
+  ```
+  
+  Then configure in `appsettings.Production.json`.
+</Tip>
+
+### Option 2: Azure App Service
+
+<Steps>
+  <Step title="Create App Service">
+    Via Azure Portal:
+    
+    1. Create new Web App
+    2. Runtime: .NET 10
+    3. Operating System: Windows or Linux
+    4. Region: Choose closest to users
+    5. App Service Plan: At least B1 (Basic) for production
+  </Step>
+  
+  <Step title="Configure Application Settings">
+    In App Service > Configuration:
+    
+    - Add all environment variables (SQL_PASSWORD, JWT_SECRET_KEY, etc.)
+    - Set `ASPNETCORE_ENVIRONMENT` to `Production`
+    - Configure connection strings
+  </Step>
+  
+  <Step title="Deploy Application">
+    <Tabs>
+      <Tab title="Visual Studio">
+        1. Right-click project > Publish
+        2. Select Azure > Azure App Service
+        3. Choose your App Service
+        4. Click Publish
+      </Tab>
+      
+      <Tab title="Azure CLI">
+        ```bash
+        az webapp up --name andando --resource-group AndanDoRG --runtime "DOTNET:10"
+        ```
+      </Tab>
+      
+      <Tab title="GitHub Actions">
+        Configure CI/CD pipeline in `.github/workflows/azure-deploy.yml`:
+        
+        ```yaml
+        name: Deploy to Azure
+        on:
+          push:
+            branches: [main]
+        
+        jobs:
+          build-and-deploy:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v3
+              
+              - name: Setup .NET
+                uses: actions/setup-dotnet@v3
+                with:
+                  dotnet-version: '10.0.x'
+              
+              - name: Build and publish
+                run: |
+                  dotnet restore
+                  dotnet build -c Release
+                  dotnet publish -c Release -o ./publish
+              
+              - name: Deploy to Azure Web App
+                uses: azure/webapps-deploy@v2
+                with:
+                  app-name: 'andando'
+                  publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+                  package: ./publish
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  
+  <Step title="Configure Custom Domain and SSL">
+    1. App Service > Custom domains > Add custom domain
+    2. Add DNS records at your domain registrar
+    3. App Service > TLS/SSL settings
+    4. Upload certificate or use free App Service Managed Certificate
+    5. Add TLS/SSL binding for your domain
+  </Step>
+</Steps>
+
+<Info>
+  **Azure SQL Database**: Consider using Azure SQL Database for managed database hosting with automatic backups, scaling, and monitoring.
+</Info>
+
+### Option 3: Docker Container
+
+<Steps>
+  <Step title="Create Dockerfile">
+    Create `Dockerfile` in the solution root:
+    
+    ```dockerfile
+    # Build stage
+    FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+    WORKDIR /src
+    
+    COPY ["AndanDo/AndanDo.csproj", "AndanDo/"]
+    RUN dotnet restore "AndanDo/AndanDo.csproj"
+    
+    COPY . .
+    WORKDIR "/src/AndanDo"
+    RUN dotnet build "AndanDo.csproj" -c Release -o /app/build
+    
+    # Publish stage
+    FROM build AS publish
+    RUN dotnet publish "AndanDo.csproj" -c Release -o /app/publish
+    
+    # Runtime stage
+    FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+    WORKDIR /app
+    
+    # Create uploads directory
+    RUN mkdir -p /app/wwwroot/uploads
+    
+    COPY --from=publish /app/publish .
+    
+    # Environment variables
+    ENV ASPNETCORE_URLS=http://+:80 \
+        ASPNETCORE_ENVIRONMENT=Production
+    
+    EXPOSE 80
+    ENTRYPOINT ["dotnet", "AndanDo.dll"]
+    ```
+  </Step>
+  
+  <Step title="Create .dockerignore">
+    ```
+    **/.dockerignore
+    **/.git
+    **/.vs
+    **/.vscode
+    **/bin
+    **/obj
+    **/out
+    **/publish
+    **/*.user
+    ```
+  </Step>
+  
+  <Step title="Build Docker Image">
+    ```bash
+    docker build -t andando:latest .
+    ```
+  </Step>
+  
+  <Step title="Run Container">
+    ```bash
+    docker run -d \
+      --name andando \
+      -p 80:80 \
+      -e SQL_PASSWORD="YourPassword" \
+      -e JWT_SECRET_KEY="your-secret-key" \
+      -e SMTP_PASSWORD="smtp-pass" \
+      -e PAYPAL_CLIENT_ID="client-id" \
+      -e PAYPAL_CLIENT_SECRET="secret" \
+      -v /var/andando/uploads:/app/wwwroot/uploads \
+      andando:latest
+    ```
+  </Step>
+  
+  <Step title="Deploy to Container Registry">
+    <Tabs>
+      <Tab title="Azure Container Registry">
+        ```bash
+        # Login to ACR
+        az acr login --name andandoacr
+        
+        # Tag image
+        docker tag andando:latest andandoacr.azurecr.io/andando:latest
+        
+        # Push image
+        docker push andandoacr.azurecr.io/andando:latest
+        
+        # Deploy to Azure Container Instances
+        az container create \
+          --resource-group AndanDoRG \
+          --name andando-container \
+          --image andandoacr.azurecr.io/andando:latest \
+          --cpu 2 --memory 4 \
+          --registry-username <username> \
+          --registry-password <password> \
+          --dns-name-label andando \
+          --ports 80
+        ```
+      </Tab>
+      
+      <Tab title="Docker Hub">
+        ```bash
+        # Login
+        docker login
+        
+        # Tag image
+        docker tag andando:latest yourusername/andando:latest
+        
+        # Push image
+        docker push yourusername/andando:latest
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+### Option 4: Linux Server (Systemd)
+
+<Steps>
+  <Step title="Install .NET Runtime">
+    On Ubuntu/Debian:
+    
+    ```bash
+    wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+    sudo dpkg -i packages-microsoft-prod.deb
+    sudo apt-get update
+    sudo apt-get install -y aspnetcore-runtime-10.0
+    ```
+  </Step>
+  
+  <Step title="Deploy Application">
+    ```bash
+    # Create application directory
+    sudo mkdir -p /var/www/andando
+    
+    # Copy published files
+    sudo cp -r ./publish/* /var/www/andando/
+    
+    # Create uploads directory
+    sudo mkdir -p /var/www/andando/wwwroot/uploads
+    sudo chown -R www-data:www-data /var/www/andando/wwwroot/uploads
+    ```
+  </Step>
+  
+  <Step title="Create Systemd Service">
+    Create `/etc/systemd/system/andando.service`:
+    
+    ```ini
+    [Unit]
+    Description=AndanDo Tour Marketplace
+    After=network.target
+    
+    [Service]
+    Type=notify
+    WorkingDirectory=/var/www/andando
+    ExecStart=/usr/bin/dotnet /var/www/andando/AndanDo.dll
+    Restart=always
+    RestartSec=10
+    KillSignal=SIGINT
+    User=www-data
+    Environment=ASPNETCORE_ENVIRONMENT=Production
+    Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+    
+    [Install]
+    WantedBy=multi-user.target
+    ```
+  </Step>
+  
+  <Step title="Configure Nginx Reverse Proxy">
+    Create `/etc/nginx/sites-available/andando`:
+    
+    ```nginx
+    server {
+        listen 80;
+        server_name andando.com.do www.andando.com.do;
+        return 301 https://$server_name$request_uri;
+    }
+    
+    server {
+        listen 443 ssl http2;
+        server_name andando.com.do www.andando.com.do;
+        
+        ssl_certificate /etc/letsencrypt/live/andando.com.do/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/andando.com.do/privkey.pem;
+        
+        location / {
+            proxy_pass http://localhost:5000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        
+        # Static files caching
+        location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2)$ {
+            proxy_pass http://localhost:5000;
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+    ```
+    
+    Enable site and reload Nginx:
+    ```bash
+    sudo ln -s /etc/nginx/sites-available/andando /etc/nginx/sites-enabled/
+    sudo nginx -t
+    sudo systemctl reload nginx
+    ```
+  </Step>
+  
+  <Step title="Start Application Service">
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable andando
+    sudo systemctl start andando
+    sudo systemctl status andando
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  **Let's Encrypt SSL**: Get free SSL certificates:
+  
+  ```bash
+  sudo apt-get install certbot python3-certbot-nginx
+  sudo certbot --nginx -d andando.com.do -d www.andando.com.do
+  ```
+</Tip>
+
+## Post-Deployment Tasks
+
+<Steps>
+  <Step title="Verify Application Health">
+    - Test homepage loads correctly
+    - Verify database connectivity
+    - Test user registration and login
+    - Create test tour and booking
+    - Verify email delivery
+    - Test PayPal payment flow
+  </Step>
+  
+  <Step title="Configure Monitoring">
+    <CardGroup cols={2}>
+      <Card title="Application Monitoring" icon="chart-line">
+        - Set up Application Insights or similar APM
+        - Configure alerts for errors and performance
+        - Track custom metrics (bookings, revenue)
+      </Card>
+      <Card title="Infrastructure Monitoring" icon="server">
+        - Monitor CPU, memory, disk usage
+        - Set up database performance monitoring
+        - Configure uptime monitoring
+      </Card>
+    </CardGroup>
+  </Step>
+  
+  <Step title="Set Up Backups">
+    **Database Backups**:
+    ```sql
+    -- Schedule daily automated backups
+    BACKUP DATABASE AndandoDB 
+    TO DISK = '/backups/AndandoDB_$(date +%Y%m%d).bak'
+    WITH FORMAT, COMPRESSION;
+    ```
+    
+    **File Backups**:
+    - Backup `wwwroot/uploads` directory daily
+    - Store backups in separate location or cloud storage
+  </Step>
+  
+  <Step title="Configure Logging">
+    Update `appsettings.Production.json` for production logging:
+    
+    ```json
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Warning",
+          "Microsoft": "Warning",
+          "Microsoft.AspNetCore.SignalR": "Information",
+          "Microsoft.AspNetCore.Http.Connections": "Information"
+        },
+        "EventLog": {
+          "LogLevel": {
+            "Default": "Warning"
+          }
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Security Best Practices
+
+<Warning>
+  **Critical Security Checklist**
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="Secure Configuration">
+    - ✅ Use strong, unique JWT secret key (64+ characters)
+    - ✅ Store secrets in environment variables or Azure Key Vault
+    - ✅ Disable detailed errors in production (`DetailedErrors: false`)
+    - ✅ Use HTTPS everywhere with valid SSL certificates
+    - ✅ Enable HSTS (configured in `Program.cs`)
+    - ✅ Set `AllowedHosts` to specific domains only
+  </Accordion>
+  
+  <Accordion title="Database Security">
+    - ✅ Use least-privilege database accounts
+    - ✅ Enable SQL Server encryption (TDE)
+    - ✅ Regular security patches and updates
+    - ✅ Firewall rules: Allow only app server IPs
+    - ✅ Enable audit logging for sensitive operations
+  </Accordion>
+  
+  <Accordion title="Application Security">
+    - ✅ Keep .NET runtime and packages updated
+    - ✅ Validate and sanitize all user inputs
+    - ✅ Use parameterized queries (already using stored procedures)
+    - ✅ Implement rate limiting for API endpoints
+    - ✅ Enable anti-forgery tokens (configured via `UseAntiforgery()`)
+  </Accordion>
+  
+  <Accordion title="File Upload Security">
+    - ✅ Validate file types and sizes
+    - ✅ Scan uploads for malware
+    - ✅ Store uploads outside webroot or use CDN
+    - ✅ Use unique filenames to prevent overwriting
+    - ✅ Set proper file permissions (read-only for web server)
+  </Accordion>
+</AccordionGroup>
+
+## Performance Tuning
+
+<CardGroup cols={2}>
+  <Card title="Blazor Server" icon="bolt">
+    - Configure SignalR message size limits
+    - Enable circuit activity tracking
+    - Set appropriate reconnection settings
+    - Optimize component rendering
+  </Card>
+  <Card title="Database" icon="database">
+    - Index frequently queried columns
+    - Optimize stored procedures
+    - Enable query execution plans
+    - Configure connection pooling
+  </Card>
+  <Card title="Caching" icon="memory">
+    - Implement response caching for static content
+    - Use distributed cache for session data
+    - Cache database query results where appropriate
+    - Configure CDN for static assets
+  </Card>
+  <Card title="Resource Limits" icon="gauge">
+    - Set Kestrel connection limits
+    - Configure max request body size
+    - Set timeout values appropriately
+    - Monitor and adjust based on load
+  </Card>
+</CardGroup>
+
+## Troubleshooting Production Issues
+
+<AccordionGroup>
+  <Accordion title="Application Won't Start">
+    **Check:**
+    1. Environment variable `ASPNETCORE_ENVIRONMENT` is set to `Production`
+    2. All required dependencies are in publish folder
+    3. .NET runtime is installed (for framework-dependent deployments)
+    4. Ports 80/443 are not blocked by firewall
+    5. Check application logs in Event Viewer (Windows) or journalctl (Linux)
+  </Accordion>
+  
+  <Accordion title="Database Connection Failures">
+    **Check:**
+    1. Connection string is correct in production config
+    2. SQL Server is running and accessible
+    3. Firewall allows traffic on SQL Server port (1433)
+    4. Database user has proper permissions
+    5. Test connection with `sqlcmd` or SQL Server Management Studio
+  </Accordion>
+  
+  <Accordion title="SignalR/WebSocket Issues">
+    **Check:**
+    1. WebSocket support is enabled in IIS/web server
+    2. Load balancer supports WebSocket sticky sessions
+    3. Firewall allows WebSocket connections
+    4. Browser console for connection errors
+    5. SignalR fallback to long polling if WebSocket fails
+  </Accordion>
+  
+  <Accordion title="File Upload Failures">
+    **Check:**
+    1. `wwwroot/uploads` directory exists
+    2. Application has write permissions to uploads folder
+    3. Disk space is available
+    4. Max request body size is sufficient
+    5. Request timeout is not too short for large files
+  </Accordion>
+</AccordionGroup>
+
+## Scaling Considerations
+
+<Info>
+  Blazor Server maintains persistent connections, requiring careful scaling strategies.
+</Info>
+
+### Vertical Scaling
+
+- Increase server CPU and RAM
+- Upgrade to higher-tier App Service plan
+- Use faster SSD storage
+
+### Horizontal Scaling (Multiple Instances)
+
+<Warning>
+  Blazor Server requires sticky sessions when scaling horizontally.
+</Warning>
+
+**Requirements:**
+1. **Sticky Sessions**: Configure load balancer for session affinity (ARR Affinity in Azure)
+2. **Shared Storage**: Use Azure Blob Storage or network share for `wwwroot/uploads`
+3. **Distributed Cache**: Implement Redis for shared session state
+4. **Database Scaling**: Use read replicas or Azure SQL elastic pools
+
+**Load Balancer Configuration (Nginx)**:
+```nginx
+upstream andando_servers {
+    ip_hash;  # Enables sticky sessions
+    server 10.0.0.1:5000;
+    server 10.0.0.2:5000;
+    server 10.0.0.3:5000;
+}
+```
+
+## Maintenance and Updates
+
+<Steps>
+  <Step title="Regular Updates">
+    - Apply .NET security patches monthly
+    - Update NuGet packages regularly
+    - Review dependency vulnerabilities
+    - Test updates in staging before production
+  </Step>
+  
+  <Step title="Database Maintenance">
+    - Weekly index maintenance
+    - Regular statistics updates
+    - Periodic backup testing
+    - Monitor database size and growth
+  </Step>
+  
+  <Step title="Monitoring and Alerts">
+    - Review application logs daily
+    - Set up alerts for critical errors
+    - Monitor performance metrics
+    - Track user experience metrics
+  </Step>
+</Steps>
+
+## Rollback Plan
+
+<Tip>
+  Always have a rollback strategy before deploying updates.
+</Tip>
+
+1. **Keep Previous Version**: Maintain previous deployment in separate directory
+2. **Database Backups**: Always backup database before schema changes
+3. **Quick Rollback**: Swap deployment folders or restore previous Docker image
+4. **Test Rollback**: Periodically test rollback procedures
+
+---
+
+<Card title="Need Help?" icon="question">
+  If you encounter issues during deployment, check the application logs, verify configuration settings, and ensure all prerequisites are met. For development setup questions, refer back to [Development Setup](/deployment/setup).
+</Card>

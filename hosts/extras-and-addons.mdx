@@ -1,0 +1,445 @@
+---
+title: 'Extras & Add-ons'
+description: 'Increase revenue by offering optional tour extras and add-ons with flexible pricing'
+icon: 'cart-plus'
+---
+
+## Overview
+
+Extras (also called add-ons) allow you to offer optional enhancements to your tour. Customers can add these during checkout to customize their experience while you increase average order value.
+
+<Tip>
+  Tours with extras see an average 25-40% increase in revenue per booking. Common extras include meals, equipment rentals, and premium experiences.
+</Tip>
+
+## Extra Charge Modes
+
+AndanDo supports three pricing strategies for extras:
+
+<CardGroup cols={3}>
+  <Card title="Flat Rate" icon="tag">
+    **Charge Mode: 1**
+    
+    Fixed price regardless of party size.
+    
+    **Example:** Photo package - $25 per order
+  </Card>
+
+  <Card title="Per Person" icon="user">
+    **Charge Mode: 2**
+    
+    Price multiplied by number of people.
+    
+    **Example:** Lunch upgrade - $15 per person
+  </Card>
+
+  <Card title="Free** (Coming Soon)" icon="gift">
+    **Charge Mode: 0**
+    
+    No charge, promotional add-on.
+    
+    **Example:** Complimentary souvenir photo
+  </Card>
+</CardGroup>
+
+## Data Structure
+
+```csharp
+public record TourExtraRequest(
+    string Name,                // Extra name
+    string Description,         // What's included
+    int ChargeMode,            // 0=Free, 1=Flat, 2=Per Person
+    decimal? BasePrice,        // Base price (for flat rate)
+    string CurrencyCode,       // "USD", "DOP", "EUR"
+    IEnumerable<TourExtraTicketPriceRequest> TicketPrices, // Per-person pricing
+    int SortOrder);            // Display order
+
+public record TourExtraTicketPriceRequest(
+    Guid TicketTypeId,         // Frontend identifier
+    string TicketName,         // "Adult", "Child"
+    decimal? Price);           // Price for this ticket type
+```
+
+## Creating Extras
+
+<Steps>
+  <Step title="Access Step 4 of Tour Wizard">
+    Navigate to "Ticket Types & Extras" in the tour creation flow.
+  </Step>
+
+  <Step title="Click Add Extra">
+    Add a new optional item.
+    
+    ```razor
+    <button type="button" 
+            @onclick="AddExtra" 
+            class="button -sm -outline-dark-1">
+      Add Extra
+    </button>
+    ```
+  </Step>
+
+  <Step title="Configure Extra Details">
+    - **Name:** Brief title ("Lunch Upgrade", "GoPro Rental")
+    - **Description:** What's included
+    - **Charge Mode:** Select pricing strategy
+    - **Price:** Set base price or per-person prices
+  </Step>
+
+  <Step title="Save Configuration">
+    The system calls `UpsertExtrasAsync` to store the extra and its pricing.
+  </Step>
+</Steps>
+
+## Flat Rate Extras
+
+Charged once per order, regardless of party size.
+
+### Example: Photo Package
+
+```csharp
+var photoPackage = new TourExtraRequest(
+    Name: "Professional Photo Package",
+    Description: "20 high-res photos of your tour, delivered digitally within 48 hours",
+    ChargeMode: 1,              // Flat rate
+    BasePrice: 25.00m,
+    CurrencyCode: "USD",
+    TicketPrices: Array.Empty<TourExtraTicketPriceRequest>(),
+    SortOrder: 1
+);
+```
+
+**Customer sees:**
+- Photo Package: $25 (applies to entire order)
+
+### Use Cases for Flat Rate
+
+- Printed photo albums
+- Souvenir packages
+- Private transportation upgrades
+- VIP lounge access
+- Commemorative certificates
+
+<Info>
+  Flat rate extras are ideal for items that don't scale with party size, like a single group photo or transportation upgrade.
+</Info>
+
+## Per-Person Extras
+
+Charged separately for each participant, with different rates per ticket type.
+
+### Example: Lunch Upgrade
+
+```csharp
+var lunchUpgrade = new TourExtraRequest(
+    Name: "Premium Lunch",
+    Description: "3-course meal at a local restaurant with wine pairing",
+    ChargeMode: 2,              // Per person
+    BasePrice: null,            // Not used for per-person
+    CurrencyCode: "USD",
+    TicketPrices: new[]
+    {
+        new TourExtraTicketPriceRequest(
+            TicketTypeId: Guid.NewGuid(),  // Links to adult ticket
+            TicketName: "Adult",
+            Price: 35.00m
+        ),
+        new TourExtraTicketPriceRequest(
+            TicketTypeId: Guid.NewGuid(),  // Links to child ticket
+            TicketName: "Child",
+            Price: 18.00m
+        )
+    },
+    SortOrder: 2
+);
+```
+
+**Customer sees (for 2 adults + 1 child):**
+- Premium Lunch: $88 (2 × $35 + 1 × $18)
+
+### Use Cases for Per-Person
+
+- Meal upgrades (lunch, dinner)
+- Equipment rentals (snorkel gear, bikes)
+- Activity add-ons (zip-lining, kayaking)
+- Entrance fees to optional sites
+- Personal guides
+
+<Warning>
+  Per-person extras require you to define a price for **each ticket type**. If you only set adult pricing, children won't be able to add the extra.
+</Warning>
+
+## Storing Extras
+
+The `UpsertExtrasAsync` method handles extra creation:
+
+```csharp
+public async Task UpsertExtrasAsync(
+    int tourId,
+    IEnumerable<TourExtraRequest> extras,
+    CancellationToken cancellationToken = default)
+{
+    if (extras is null) return;
+
+    using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var extra in extras)
+    {
+        using var command = new SqlCommand("sp_TourExtra_Insert", connection)
+        {
+            CommandType = CommandType.StoredProcedure
+        };
+
+        command.Parameters.AddWithValue("@TourId", tourId);
+        command.Parameters.AddWithValue("@Name", extra.Name ?? string.Empty);
+        command.Parameters.AddWithValue("@Description", (object?)extra.Description ?? DBNull.Value);
+        command.Parameters.AddWithValue("@ChargeMode", extra.ChargeMode);
+        command.Parameters.AddWithValue("@BasePrice", (object?)extra.BasePrice ?? DBNull.Value);
+        command.Parameters.AddWithValue("@CurrencyCode", extra.CurrencyCode ?? "USD");
+        command.Parameters.AddWithValue("@SortOrder", extra.SortOrder);
+
+        var extraIdParameter = new SqlParameter("@NewExtraId", SqlDbType.Int)
+        {
+            Direction = ParameterDirection.Output
+        };
+        command.Parameters.Add(extraIdParameter);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        // Get the generated TourExtraId
+        var extraId = (int)(extraIdParameter.Value ?? 0);
+
+        // If per-person pricing, store ticket-specific prices
+        if (extra.ChargeMode == 2 && extra.TicketPrices is not null)
+        {
+            foreach (var price in extra.TicketPrices)
+            {
+                using var priceCommand = new SqlCommand("sp_TourExtraPerTicketType_Insert", connection)
+                {
+                    CommandType = CommandType.StoredProcedure
+                };
+
+                priceCommand.Parameters.AddWithValue("@TourExtraId", extraId);
+                priceCommand.Parameters.AddWithValue("@TourTicketTypeId", 0); // Placeholder
+                priceCommand.Parameters.AddWithValue("@Price", (object?)price.Price ?? DBNull.Value);
+
+                await priceCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+    }
+}
+```
+
+<Note>
+  The current implementation uses a placeholder `TourTicketTypeId` of 0 for per-person pricing. In production, this should be mapped to the actual database ID of the ticket type.
+</Note>
+
+## Retrieving Extras
+
+Extras are loaded as part of the tour detail DTO:
+
+```csharp
+public sealed record TourExtraDetailDto(
+    int TourExtraId,
+    string Name,
+    string? Description,
+    byte ChargeMode,                    // 0=Free, 1=Flat, 2=Per Person
+    decimal? BasePrice,
+    string CurrencyCode,
+    bool IsActive,
+    int SortOrder,
+    IReadOnlyList<TourExtraPricePerTicketDetailDto> TicketPrices
+);
+
+public sealed record TourExtraPricePerTicketDetailDto(
+    int TourExtraPerTicketTypeId,
+    int TourExtraId,
+    int TourTicketTypeId,
+    decimal Price
+);
+```
+
+### Loading Extras for a Tour
+
+Extras are fetched via `GetTourFullByIdAsync` which returns a `TourFullDetailDto` containing all extras.
+
+## Marketplace Display
+
+On the tour details page (`TourDetails.razor`), extras appear in the booking widget:
+
+```razor
+<div class="extra-row">
+    <div class="extra-left">
+        <input type="checkbox" 
+               @bind="selectedExtras[extra.TourExtraId]" 
+               id="extra_@extra.TourExtraId" />
+        <label for="extra_@extra.TourExtraId">
+            <span class="extra-name">@extra.Name</span>
+            @if (!string.IsNullOrWhiteSpace(extra.Description))
+            {
+                <button type="button" 
+                        class="extra-tip-btn" 
+                        data-tip="@extra.Description">
+                    ?
+                </button>
+            }
+        </label>
+    </div>
+    <div class="extra-price">
+        @if (extra.ChargeMode == 1)
+        {
+            <!-- Flat rate -->
+            <span>@FormatCurrency(extra.BasePrice ?? 0, extra.CurrencyCode)</span>
+        }
+        else if (extra.ChargeMode == 2)
+        {
+            <!-- Per person -->
+            <span>From @FormatCurrency(GetMinExtraPrice(extra), extra.CurrencyCode)/person</span>
+        }
+    </div>
+</div>
+```
+
+<Tip>
+  The `?` tooltip button shows the extra description on hover, helping customers understand what they're paying for without cluttering the UI.
+</Tip>
+
+## Calculating Extra Costs
+
+The booking widget dynamically calculates extra costs based on party composition:
+
+```csharp
+private decimal CalculateExtrasTotal()
+{
+    decimal total = 0;
+    
+    foreach (var extra in _tourExtras.Where(e => selectedExtras.GetValueOrDefault(e.TourExtraId)))
+    {
+        if (extra.ChargeMode == 1)
+        {
+            // Flat rate
+            total += extra.BasePrice ?? 0;
+        }
+        else if (extra.ChargeMode == 2)
+        {
+            // Per person - sum across all ticket types
+            foreach (var ticketType in _ticketTypes)
+            {
+                var quantity = GetTicketQuantity(ticketType.TourTicketTypeId);
+                if (quantity > 0)
+                {
+                    var priceForType = extra.TicketPrices
+                        .FirstOrDefault(p => p.TourTicketTypeId == ticketType.TourTicketTypeId)?.Price ?? 0;
+                    total += priceForType * quantity;
+                }
+            }
+        }
+    }
+    
+    return total;
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Naming & Descriptions">
+    - Use action-oriented names: "Upgrade to Premium Lunch" vs "Lunch Option"
+    - Include what's covered: "GoPro Rental (includes SD card + mount)"
+    - Explain value: "Professional photos delivered in 48 hours"
+    - Keep names under 30 characters for mobile
+    - Write descriptions at 6th-grade reading level
+  </Accordion>
+
+  <Accordion title="Pricing Strategy">
+    - Price extras 15-30% of base tour price
+    - Offer bundles: "Photo + Lunch Package" at 10% discount
+    - Use per-person for consumables (food, gear)
+    - Use flat rate for one-time items (group photo, certificates)
+    - Test different price points to find optimal conversion
+  </Accordion>
+
+  <Accordion title="Maximizing Add-on Revenue">
+    - Offer 3-5 extras per tour (not too many choices)
+    - Place most popular extra first (highest conversion)
+    - Use scarcity: "Limited to 10 customers per day"
+    - Show savings: "$45 value, only $35 with tour"
+    - Pre-select high-value extras (customer can deselect)
+  </Accordion>
+
+  <Accordion title="Operational Considerations">
+    - Ensure extras are actually available before offering
+    - Update inventory for limited extras (e.g., equipment rentals)
+    - Communicate extra details in confirmation email
+    - Train guides on delivering extras
+    - Track extra adoption rates in your dashboard
+  </Accordion>
+</AccordionGroup>
+
+## Common Extra Ideas
+
+<CardGroup cols={2}>
+  <Card title="Food & Beverage" icon="utensils">
+    - Lunch/dinner upgrades
+    - Premium wine tasting
+    - Snack packs
+    - Coffee & pastries
+    - Local delicacies
+  </Card>
+
+  <Card title="Equipment & Gear" icon="hiking">
+    - Snorkel gear rental
+    - Bicycle upgrades
+    - Camera/GoPro rentals
+    - Binoculars
+    - Walking poles
+  </Card>
+
+  <Card title="Experiences" icon="sparkles">
+    - Private guide upgrade
+    - Behind-the-scenes access
+    - Meet & greet with chef/artist
+    - Cooking class add-on
+    - Spa treatment
+  </Card>
+
+  <Card title="Memorabilia" icon="camera">
+    - Professional photography
+    - Printed photo albums
+    - Certificates/diplomas
+    - Branded merchandise
+    - Souvenir packages
+  </Card>
+</CardGroup>
+
+## Technical Notes
+
+<Warning>
+  **Current Limitation:** The `TourExtraTicketPriceRequest` uses a `Guid TicketTypeId` from the frontend, but the database stores integer IDs. This mapping is not fully implemented in the current version.
+  
+  **Workaround:** The stored procedure uses a placeholder `TourTicketTypeId` of 0. In production, you'll need to:
+  1. Capture the generated `TourTicketTypeId` when creating ticket types
+  2. Map the frontend `Guid` to the database `int` ID
+  3. Pass the correct ID to `sp_TourExtraPerTicketType_Insert`
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Pricing Strategies" icon="dollar-sign" href="/hosts/pricing">
+    Learn advanced pricing and quote configurations
+  </Card>
+
+  <Card title="Dashboard Analytics" icon="chart-line" href="/hosts/dashboard">
+    Track extra adoption and revenue metrics
+  </Card>
+
+  <Card title="Booking Management" icon="calendar-check" href="/hosts/managing-bookings">
+    View customer orders with extras
+  </Card>
+  
+  <Card title="Customer Experience" icon="star" href="/guides/making-reservations">
+    See how customers interact with extras
+  </Card>
+</CardGroup>

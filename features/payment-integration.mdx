@@ -1,0 +1,640 @@
+---
+title: Payment Integration
+description: PayPal integration for secure online payments with order creation, payment capture, and webhook handling
+icon: credit-card
+---
+
+## Overview
+
+AndanDo integrates PayPal's REST API for secure payment processing. The integration supports order creation, payment approval flows, and multiple currencies. All payment operations are handled server-side to ensure security and PCI compliance.
+
+<CardGroup cols={2}>
+  <Card title="PayPal REST API" icon="paypal">
+    Direct integration with PayPal v2 Checkout API
+  </Card>
+  <Card title="Multi-Currency" icon="globe">
+    Support for DOP, USD, EUR, and other currencies
+  </Card>
+  <Card title="Server-Side Processing" icon="server">
+    All payment logic runs on secure backend
+  </Card>
+  <Card title="OAuth 2.0" icon="key">
+    Secure authentication with PayPal using client credentials
+  </Card>
+</CardGroup>
+
+## PayPal Service Architecture
+
+### Service Interface
+
+```csharp IPaypalService.cs
+public interface IPaypalService
+{
+    Task<PaypalOrderResult?> CreateOrderAsync(
+        decimal amount, 
+        string currency, 
+        string returnUrl, 
+        string cancelUrl
+    );
+}
+
+public record PaypalOrderResult(
+    string OrderId, 
+    string? ApprovalUrl
+);
+```
+
+### Service Implementation
+
+```csharp PaypalService.cs
+public class PaypalService : IPaypalService
+{
+    private readonly HttpClient _httpClient;
+    private readonly PaypalOptions _options;
+
+    public PaypalService(HttpClient httpClient, IOptions<PaypalOptions> options)
+    {
+        _httpClient = httpClient;
+        _options = options.Value;
+    }
+
+    public async Task<PaypalOrderResult?> CreateOrderAsync(
+        decimal amount, 
+        string currency, 
+        string returnUrl, 
+        string cancelUrl)
+    {
+        // 1. Acquire access token
+        var accessToken = await AcquireAccessTokenAsync();
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return null;
+        }
+
+        // 2. Create order
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, 
+            $"{_options.BaseUrl.TrimEnd('/')}/v2/checkout/orders"
+        );
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        var body = new
+        {
+            intent = "CAPTURE",
+            purchase_units = new[]
+            {
+                new
+                {
+                    amount = new
+                    {
+                        currency_code = currency.ToUpperInvariant(),
+                        value = amount.ToString("0.00", CultureInfo.InvariantCulture)
+                    }
+                }
+            },
+            application_context = new
+            {
+                return_url = returnUrl,
+                cancel_url = cancelUrl
+            }
+        };
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(body), 
+            Encoding.UTF8, 
+            "application/json"
+        );
+
+        var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"PayPal order failed: {response.StatusCode}");
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var order = await JsonSerializer.DeserializeAsync<PaypalOrderResponse>(stream);
+        var approval = order?.links?.FirstOrDefault(
+            l => string.Equals(l.rel, "approve", StringComparison.OrdinalIgnoreCase)
+        )?.href;
+        
+        return order is null ? null : new PaypalOrderResult(order.id ?? string.Empty, approval);
+    }
+
+    private async Task<string?> AcquireAccessTokenAsync()
+    {
+        var creds = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes($"{_options.ClientId}:{_options.ClientSecret}")
+        );
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, 
+            $"{_options.BaseUrl.TrimEnd('/')}/v1/oauth2/token"
+        );
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", creds);
+        request.Content = new StringContent(
+            "grant_type=client_credentials", 
+            Encoding.UTF8, 
+            "application/x-www-form-urlencoded"
+        );
+
+        var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"PayPal token failed: {response.StatusCode}");
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var token = await JsonSerializer.DeserializeAsync<PaypalTokenResponse>(stream);
+        return token?.access_token;
+    }
+
+    private record PaypalTokenResponse(
+        string? scope, 
+        string? access_token, 
+        string? token_type, 
+        string? app_id, 
+        int expires_in
+    );
+
+    private record PaypalOrderResponse(
+        string? id, 
+        string? status, 
+        PaypalLink[]? links
+    );
+
+    private record PaypalLink(
+        string? href, 
+        string? rel, 
+        string? method
+    );
+}
+```
+
+## Configuration
+
+### PayPal Options
+
+```csharp PaypalOptions.cs
+public sealed class PaypalOptions
+{
+    public string ClientId { get; set; } = string.Empty;
+    public string ClientSecret { get; set; } = string.Empty;
+    public string BaseUrl { get; set; } = "https://api-m.sandbox.paypal.com";
+}
+```
+
+### appsettings.json
+
+```json
+{
+  "Paypal": {
+    "ClientId": "your-paypal-client-id",
+    "ClientSecret": "your-paypal-client-secret",
+    "BaseUrl": "https://api-m.sandbox.paypal.com"
+  }
+}
+```
+
+<Warning>
+**Production vs Sandbox:**
+- Sandbox: `https://api-m.sandbox.paypal.com`
+- Production: `https://api-m.paypal.com`
+
+Always use sandbox credentials during development!
+</Warning>
+
+### Service Registration
+
+```csharp Program.cs
+builder.Services.Configure<PaypalOptions>(builder.Configuration.GetSection("Paypal"));
+builder.Services.AddHttpClient<IPaypalService, PaypalService>();
+```
+
+## Payment Flow
+
+### Step 1: Create PayPal Order
+
+```csharp Payment Initiation
+private async Task InitiatePaymentAsync()
+{
+    var amount = CalculateTotalAmount();
+    var returnUrl = $"{NavigationManager.BaseUri}payment/return";
+    var cancelUrl = $"{NavigationManager.BaseUri}payment/cancel";
+    
+    var result = await PaypalService.CreateOrderAsync(
+        amount, 
+        "DOP", 
+        returnUrl, 
+        cancelUrl
+    );
+    
+    if (result is null || string.IsNullOrWhiteSpace(result.ApprovalUrl))
+    {
+        ShowError("No pudimos iniciar el pago. Intenta de nuevo.");
+        return;
+    }
+    
+    // Create reservation in pending state
+    var reservationId = await CreatePendingReservationAsync();
+    
+    // Store reservation ID for return handling
+    await Storage.SetAsync("pending_reservation_id", reservationId);
+    await Storage.SetAsync("paypal_order_id", result.OrderId);
+    
+    // Redirect to PayPal
+    NavigationManager.NavigateTo(result.ApprovalUrl, forceLoad: true);
+}
+```
+
+<Steps>
+  <Step title="Calculate Total">
+    Sum all ticket prices and extras
+  </Step>
+  <Step title="Create PayPal Order">
+    Call PayPal API to create order and get approval URL
+  </Step>
+  <Step title="Create Pending Reservation">
+    Store reservation with PaymentStatus = 0 (Pending)
+  </Step>
+  <Step title="Redirect to PayPal">
+    Send user to PayPal approval page
+  </Step>
+</Steps>
+
+### Step 2: PayPal Approval
+
+User completes payment on PayPal's hosted page. PayPal redirects to your return URL with order details:
+
+```url
+https://yoursite.com/payment/return?token=ORDER-123&PayerID=PAYER-456
+```
+
+### Step 3: Payment Return Handler
+
+```razor PaymentReturn.razor
+@page "/payment/return"
+@inject IPaypalService PaypalService
+@inject ITourService TourService
+@inject ProtectedLocalStorage Storage
+@inject NavigationManager NavigationManager
+
+<div class="container">
+    @if (_isProcessing)
+    {
+        <div class="text-center">
+            <div class="spinner-border text-accent-1" style="width: 3rem; height: 3rem;"></div>
+            <h3>Procesando tu pago...</h3>
+            <p>No cierres esta ventana.</p>
+        </div>
+    }
+    else if (_success)
+    {
+        <div class="alert alert-success">
+            <h3>¡Pago exitoso!</h3>
+            <p>Tu reserva ha sido confirmada. Reserva #@_reservationId</p>
+            <a href="/hosts/managing-bookings" class="btn btn-primary">Ver mis reservas</a>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-danger">
+            <h3>Error al procesar el pago</h3>
+            <p>@_errorMessage</p>
+            <a href="/features/marketplace" class="btn btn-secondary">Volver al marketplace</a>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, SupplyParameterFromQuery(Name = "token")] 
+    public string? OrderToken { get; set; }
+    
+    [Parameter, SupplyParameterFromQuery(Name = "PayerID")] 
+    public string? PayerId { get; set; }
+
+    private bool _isProcessing = true;
+    private bool _success;
+    private int? _reservationId;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // 1. Retrieve stored reservation ID
+            var storedReservation = await Storage.GetAsync<int>("pending_reservation_id");
+            if (!storedReservation.Success || storedReservation.Value <= 0)
+            {
+                _errorMessage = "No se encontró la reserva pendiente.";
+                return;
+            }
+
+            _reservationId = storedReservation.Value;
+
+            // 2. Validate PayPal order token
+            if (string.IsNullOrWhiteSpace(OrderToken))
+            {
+                _errorMessage = "Token de PayPal inválido.";
+                return;
+            }
+
+            // 3. Update reservation status
+            await TourService.UpdateReservationPaymentStatusAsync(
+                _reservationId.Value,
+                1, // PaymentStatus = 1 (Completed)
+                "PayPal",
+                OrderToken
+            );
+
+            // 4. Clear pending data
+            await Storage.DeleteAsync("pending_reservation_id");
+            await Storage.DeleteAsync("paypal_order_id");
+
+            _success = true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+            _errorMessage = "Ocurrió un error al confirmar tu pago. Contáctanos para verificar tu reserva.";
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+}
+```
+
+### Step 4: Payment Cancellation
+
+```razor PaymentCancel.razor
+@page "/payment/cancel"
+@inject ProtectedLocalStorage Storage
+@inject NavigationManager NavigationManager
+
+<div class="container">
+    <div class="alert alert-warning">
+        <h3>Pago cancelado</h3>
+        <p>Has cancelado el proceso de pago. Tu reserva no ha sido confirmada.</p>
+        <button class="btn btn-primary" @onclick="RetryPayment">Intentar de nuevo</button>
+        <a href="/marketplace" class="btn btn-secondary">Volver al marketplace</a>
+    </div>
+</div>
+
+@code {
+    private async Task RetryPayment()
+    {
+        var storedReservation = await Storage.GetAsync<int>("pending_reservation_id");
+        if (storedReservation.Success && storedReservation.Value > 0)
+        {
+            // Redirect back to tour details to retry
+            var tourId = await GetTourIdFromReservationAsync(storedReservation.Value);
+            NavigationManager.NavigateTo($"/tours/details/{tourId}");
+        }
+        else
+        {
+            NavigationManager.NavigateTo("/marketplace");
+        }
+    }
+}
+```
+
+## Payment Status Management
+
+Reservations track payment status:
+
+```csharp Update Payment Status
+public async Task UpdateReservationPaymentStatusAsync(
+    int reservationId,
+    byte paymentStatus,
+    string? paymentProvider,
+    string? paymentReference,
+    CancellationToken cancellationToken = default)
+{
+    if (reservationId <= 0)
+    {
+        throw new ArgumentException("ReservationId invalido.", nameof(reservationId));
+    }
+
+    await using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    var sql = $@"
+        UPDATE TourReservation
+        SET PaymentStatus = @PaymentStatus,
+            PaymentProvider = @PaymentProvider,
+            PaymentReference = @PaymentReference,
+            UpdatedAt = SYSUTCDATETIME()
+        WHERE TourReservationId = @ReservationId;
+    ";
+
+    await using var cmd = new SqlCommand(sql, connection);
+    cmd.Parameters.Add(new SqlParameter("@PaymentStatus", SqlDbType.TinyInt) 
+        { Value = paymentStatus });
+    cmd.Parameters.AddWithValue("@PaymentProvider", (object?)paymentProvider ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@PaymentReference", (object?)paymentReference ?? DBNull.Value);
+    cmd.Parameters.Add(new SqlParameter("@ReservationId", SqlDbType.Int) 
+        { Value = reservationId });
+
+    var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+    if (rows == 0)
+    {
+        throw new InvalidOperationException("No se encontro la reserva a actualizar.");
+    }
+}
+```
+
+### Payment Status Codes
+
+| Status | Description |
+|--------|-------------|
+| 0 | Pending |
+| 1 | Completed |
+| 2 | Failed |
+| 3 | Refunded |
+| 4 | Cancelled |
+
+## Multi-Currency Support
+
+PayPal supports multiple currencies. Ensure amounts are formatted correctly:
+
+```csharp Currency Formatting
+var body = new
+{
+    intent = "CAPTURE",
+    purchase_units = new[]
+    {
+        new
+        {
+            amount = new
+            {
+                currency_code = currency.ToUpperInvariant(), // "DOP", "USD", etc.
+                value = amount.ToString("0.00", CultureInfo.InvariantCulture) // "150.00"
+            }
+        }
+    }
+};
+```
+
+<Note>
+Always use `CultureInfo.InvariantCulture` when formatting amounts for PayPal to ensure consistent decimal separators (period, not comma).
+</Note>
+
+## Error Handling
+
+### Common PayPal Errors
+
+```csharp Robust Error Handling
+public async Task<PaypalOrderResult?> CreateOrderAsync(
+    decimal amount, 
+    string currency, 
+    string returnUrl, 
+    string cancelUrl)
+{
+    try
+    {
+        var accessToken = await AcquireAccessTokenAsync();
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            Console.WriteLine("Failed to acquire PayPal access token");
+            return null;
+        }
+
+        // ... create order ...
+
+        var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"PayPal order failed: {response.StatusCode}");
+            Console.WriteLine($"Error details: {errorBody}");
+            return null;
+        }
+
+        // ... parse response ...
+    }
+    catch (HttpRequestException ex)
+    {
+        Console.WriteLine($"Network error communicating with PayPal: {ex.Message}");
+        return null;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Unexpected error creating PayPal order: {ex.Message}");
+        return null;
+    }
+}
+```
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Never Expose Secrets" icon="eye-slash">
+    - Store ClientId and ClientSecret in secure configuration
+    - Never commit credentials to source control
+    - Use environment variables in production
+  </Card>
+  
+  <Card title="Validate Server-Side" icon="check-double">
+    - Always verify payment status on your server
+    - Don't trust client-side payment confirmations
+    - Use PayPal webhooks for real-time updates
+  </Card>
+  
+  <Card title="Handle Failures Gracefully" icon="triangle-exclamation">
+    - Implement retry logic for network failures
+    - Log all payment attempts
+    - Provide clear error messages to users
+  </Card>
+  
+  <Card title="Prevent Duplicate Payments" icon="ban">
+    - Check reservation status before creating orders
+    - Use idempotency keys
+    - Handle concurrent payment attempts
+  </Card>
+</CardGroup>
+
+## PayPal Webhooks
+
+For production, implement webhook handlers to receive real-time payment updates:
+
+```csharp Webhook Endpoint Example
+[ApiController]
+[Route("api/webhooks/paypal")]
+public class PaypalWebhookController : ControllerBase
+{
+    private readonly ITourService _tourService;
+
+    [HttpPost]
+    public async Task<IActionResult> HandleWebhook([FromBody] JsonElement payload)
+    {
+        // 1. Verify webhook signature (important!)
+        var isValid = await VerifyPaypalWebhookSignatureAsync(payload);
+        if (!isValid)
+        {
+            return Unauthorized();
+        }
+
+        // 2. Parse event type
+        var eventType = payload.GetProperty("event_type").GetString();
+        
+        switch (eventType)
+        {
+            case "PAYMENT.CAPTURE.COMPLETED":
+                await HandlePaymentCompletedAsync(payload);
+                break;
+            case "PAYMENT.CAPTURE.DENIED":
+                await HandlePaymentDeniedAsync(payload);
+                break;
+            case "PAYMENT.CAPTURE.REFUNDED":
+                await HandlePaymentRefundedAsync(payload);
+                break;
+        }
+
+        return Ok();
+    }
+}
+```
+
+## Testing
+
+### Sandbox Test Accounts
+
+Use PayPal sandbox test accounts for development:
+
+1. Create test accounts at [developer.paypal.com](https://developer.paypal.com)
+2. Use sandbox credentials in appsettings.Development.json
+3. Test with PayPal's test credit cards
+
+### Test Credit Cards
+
+| Card Number | Type | CVV |
+|-------------|------|-----|
+| 4032034740267099 | Visa | Any 3 digits |
+| 5425162585592488 | Mastercard | Any 3 digits |
+
+<Warning>
+Never use real credit cards in sandbox environment!
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Implement Webhooks" icon="webhook">
+    Set up PayPal webhooks for real-time payment notifications
+  </Card>
+  
+  <Card title="Add Refund Support" icon="rotate-left">
+    Implement refund processing through PayPal API
+  </Card>
+  
+  <Card title="Support More Gateways" icon="credit-card">
+    Add Stripe, Square, or local payment processors
+  </Card>
+  
+  <Card title="Implement Subscriptions" icon="repeat">
+    Use PayPal subscriptions for recurring tour bookings
+  </Card>
+</CardGroup>

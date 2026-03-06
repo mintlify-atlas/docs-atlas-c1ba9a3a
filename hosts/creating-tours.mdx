@@ -1,0 +1,309 @@
+---
+title: 'Creating New Tours'
+description: 'Learn how to create and publish tours on the AndanDo marketplace'
+icon: 'plus-circle'
+---
+
+## Overview
+
+AndanDo's tour creation system uses a multi-step wizard that guides you through building a complete tour package. The system handles everything from basic information to advanced pricing configurations.
+
+<Note>
+  All tours start in draft mode and must pass validation before going live on the marketplace.
+</Note>
+
+## Creating Your First Tour
+
+<Steps>
+  <Step title="Access the Tour Creation Form">
+    Navigate to `/tours/new` in your dashboard. The system will check your authentication status and load the multi-step wizard.
+    
+    ```csharp
+    // Route definition from NewTour.razor
+    @page "/tours/new"
+    @page "/tours/edit/{id:int}"
+    ```
+  </Step>
+
+  <Step title="Complete the 5-Step Process">
+    The tour creation wizard consists of five main steps:
+    
+    - **Step 1:** General Information
+    - **Step 2:** Location & Hero Details
+    - **Step 3:** Itinerary & FAQs
+    - **Step 4:** Ticket Types & Extras
+    - **Step 5:** Review & Publish
+  </Step>
+
+  <Step title="Save and Publish">
+    After completing all steps, the system creates your tour using the `CreateTourAsync` method and stores all related data.
+  </Step>
+</Steps>
+
+## Step 1: General Information
+
+The first step collects core tour details that will be stored in the `Tour` table.
+
+### Required Fields
+
+<CardGroup cols={2}>
+  <Card title="Tour Title" icon="heading">
+    The main display name for your tour. Should be descriptive and engaging.
+    
+    **Example:** "Amazing Paris Experience"
+  </Card>
+
+  <Card title="Location Label" icon="location-dot">
+    Where your tour takes place. Used for filtering and display.
+    
+    **Example:** "Paris, France"
+  </Card>
+
+  <Card title="Start Date" icon="calendar-day">
+    When your tour begins. This is **mandatory** for marketplace visibility.
+    
+    Uses `datetime-local` input for precise scheduling.
+  </Card>
+
+  <Card title="End Date" icon="calendar-xmark">
+    When your tour ends. Also **mandatory** for proper date range filtering.
+    
+    Stored in the `TourFechas` table.
+  </Card>
+</CardGroup>
+
+### Tour Description
+
+<Accordion title="Short Description">
+  A brief summary (2-3 sentences) that appears in tour cards on the marketplace.
+  
+  ```razor
+  <textarea class="form-input" 
+            @bind="Tour.ShortDescription" 
+            rows="2" 
+            placeholder="Brief text for cards">
+  </textarea>
+  ```
+  
+  <Tip>
+    Use the AI assistance button to auto-generate compelling descriptions based on your tour title and location.
+  </Tip>
+</Accordion>
+
+<Accordion title="Full Description (HTML)">
+  The complete tour overview that supports HTML formatting for rich content.
+  
+  ```razor
+  <textarea class="form-input min-h-200" 
+            @bind="Tour.DescriptionHtml" 
+            placeholder="<p>Tell your tour's story...</p>">
+  </textarea>
+  ```
+  
+  **Supported HTML tags:** `<p>`, `<h3>`, `<ul>`, `<li>`, `<strong>`, `<em>`, `<br>`
+</Accordion>
+
+### Image Upload
+
+Tours require high-quality images in horizontal aspect ratio (~1920x1080).
+
+<Steps>
+  <Step title="Select Images">
+    Click "Upload Images" to select multiple files.
+    
+    ```razor
+    <InputFile class="upload-input" 
+               OnChange="HandleImageUpload" 
+               multiple />
+    ```
+  </Step>
+
+  <Step title="Validation">
+    The system validates:
+    - File formats: JPG, JPEG, PNG
+    - Aspect ratio warnings for non-horizontal images
+    - File size limits
+  </Step>
+
+  <Step title="Storage">
+    Images are stored in `/wwwroot/uploads/tours/` and names are saved as a comma-separated list in `Tour.ImageList`.
+    
+    ```csharp
+    Tour.ImageList = "img1.jpg,img2.png,img3.jpg"
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Images cannot be changed after tour creation without deleting and recreating the tour. Plan your images carefully.
+</Warning>
+
+## Tour Activation Settings
+
+### Toggle Options
+
+<CardGroup cols={2}>
+  <Card title="Tour Active" icon="toggle-on">
+    Controls whether the tour appears on the marketplace.
+    
+    ```razor
+    <input type="checkbox" @bind="Tour.IsActive">
+    ```
+    
+    **Default:** `false` (inactive/draft)
+  </Card>
+
+  <Card title="Instant Preview" icon="eye">
+    Shows a snapshot view on the homepage slider.
+    
+    ```razor
+    <input type="checkbox" @bind="Tour.MuestraInstantanea">
+    ```
+    
+    **Use case:** Featured/promotional tours
+  </Card>
+</CardGroup>
+
+## AI-Assisted Content Generation
+
+AndanDo includes AI integration to help generate professional tour content.
+
+<Accordion title="How to Use AI Assistance">
+  Click the AI chip button (⚡ IA) next to any text field:
+  
+  ```razor
+  <button type="button" 
+          @onclick="() => GenerateText(1)" 
+          class="ai-chip" 
+          title="Auto-generate with AI">
+    <svg>...</svg>
+    <span>IA</span>
+  </button>
+  ```
+  
+  **Available for:**
+  - Tour titles
+  - Short descriptions  
+  - Full HTML descriptions
+  - Itinerary step content
+  
+  The AI analyzes your tour title and location to generate contextually relevant content.
+</Accordion>
+
+## Creating a Tour via API
+
+The tour creation process calls the `TourService.CreateTourAsync` method:
+
+```csharp
+public async Task<int> CreateTourAsync(
+    TourRegistrationRequest request,
+    CancellationToken cancellationToken = default)
+{
+    using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    using var command = new SqlCommand("sp_Tour_Insert", connection)
+    {
+        CommandType = CommandType.StoredProcedure
+    };
+
+    // Convert OwnerUserId from string to int
+    int ownerId = 0;
+    if (!string.IsNullOrWhiteSpace(request.OwnerUserId))
+    {
+        int.TryParse(request.OwnerUserId, out ownerId);
+    }
+
+    command.Parameters.AddWithValue("@OwnerUserId", ownerId);
+    command.Parameters.AddWithValue("@Title", request.Title ?? string.Empty);
+    command.Parameters.AddWithValue("@LocationLabel", request.LocationLabel ?? string.Empty);
+    command.Parameters.AddWithValue("@ImageList", (object?)request.ImageList ?? DBNull.Value);
+    command.Parameters.AddWithValue("@DescriptionHtml", (object?)request.DescriptionHtml ?? DBNull.Value);
+    command.Parameters.AddWithValue("@ShortDescription", (object?)request.ShortDescription ?? DBNull.Value);
+    command.Parameters.AddWithValue("@MuestraInstantanea", request.MuestraInstantanea);
+
+    var idParameter = new SqlParameter("@NewTourId", SqlDbType.Int)
+    {
+        Direction = ParameterDirection.Output
+    };
+    command.Parameters.Add(idParameter);
+
+    await command.ExecuteNonQueryAsync(cancellationToken);
+
+    return (int)(idParameter.Value ?? 0);
+}
+```
+
+<Info>
+  The stored procedure `sp_Tour_Insert` returns the new `TourId` which is used to link all subsequent tour details (ticket types, itinerary, FAQs, etc.).
+</Info>
+
+## Data Structure
+
+Tour creation uses the `TourRegistrationRequest` record:
+
+```csharp
+public record TourRegistrationRequest(
+    string OwnerUserId,
+    string Title,
+    string LocationLabel,
+    string ShortDescription,
+    string DescriptionHtml,
+    string ImageList,
+    bool IsActive,
+    bool MuestraInstantanea,
+    bool IsQuote,
+    bool IsNoPayment,
+    decimal? QuoteDepositPercent,
+    int? QuoteDueDays,
+    DateTime? CreatedAt,
+    DateTime? UpdatedAt);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tour Details" icon="circle-info" href="/hosts/tour-details">
+    Add itinerary, FAQs, and inclusions to your tour
+  </Card>
+
+  <Card title="Ticket Types" icon="ticket" href="/hosts/ticket-types">
+    Configure ticket types and capacity management
+  </Card>
+
+  <Card title="Pricing" icon="dollar-sign" href="/hosts/pricing">
+    Set up pricing strategies and payment options
+  </Card>
+
+  <Card title="Extras & Add-ons" icon="plus" href="/hosts/extras-and-addons">
+    Create optional extras to increase revenue
+  </Card>
+</CardGroup>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Tour not appearing on marketplace">
+    Ensure:
+    - `IsActive` is set to `true`
+    - Start and end dates are configured
+    - At least one ticket type is created
+    - All required fields are filled
+  </Accordion>
+
+  <Accordion title="Image upload fails">
+    Check:
+    - File format is JPG, JPEG, or PNG
+    - File size is under the limit (typically 5MB)
+    - Upload directory has write permissions
+    - Image dimensions are reasonable (< 4K resolution)
+  </Accordion>
+
+  <Accordion title="Cannot save tour">
+    Verify:
+    - You're authenticated as a host
+    - Network connection is stable
+    - All mandatory fields are completed
+    - No validation errors in the form
+  </Accordion>
+</AccordionGroup>

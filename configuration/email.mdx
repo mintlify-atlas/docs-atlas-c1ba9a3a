@@ -1,0 +1,579 @@
+---
+title: 'Email Configuration'
+description: 'SMTP email service configuration for sending transactional emails'
+icon: 'envelope'
+---
+
+## Overview
+
+AndanDo uses SMTP to send transactional emails including password resets, booking confirmations, and notifications. The email service is built on MailKit and configured through the `Smtp` section in `appsettings.json`.
+
+<Info>
+The email service supports all major SMTP providers including Gmail, SendGrid, AWS SES, and custom SMTP servers.
+</Info>
+
+## Configuration
+
+Email settings are configured in the `Smtp` section of `appsettings.json`:
+
+```json appsettings.json
+{
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@gmail.com",
+    "Password": "your-app-password",
+    "FromEmail": "noreply@andando.com",
+    "FromName": "AndanDO"
+  }
+}
+```
+
+## Configuration Properties
+
+### Host
+
+The SMTP server hostname.
+
+```json
+"Host": "smtp.gmail.com"
+```
+
+- **Type**: `string`
+- **Required**: Yes
+- **Examples**: `smtp.gmail.com`, `smtp.sendgrid.net`, `email-smtp.us-east-1.amazonaws.com`
+
+### Port
+
+The SMTP server port number.
+
+```json
+"Port": 587
+```
+
+- **Type**: `int`
+- **Required**: Yes
+- **Common Ports**:
+  - `587` - Submission port with STARTTLS (recommended)
+  - `465` - SMTP over SSL (legacy)
+  - `25` - Standard SMTP (usually blocked by ISPs)
+  - `2525` - Alternative submission port
+
+<Tip>
+Port 587 with STARTTLS is the modern standard and recommended for most use cases.
+</Tip>
+
+### UseSsl
+
+Enable SSL/TLS from the start of the connection (port 465).
+
+```json
+"UseSsl": false
+```
+
+- **Type**: `bool`
+- **Required**: No
+- **Default**: `false`
+- **Use Case**: Set to `true` only for port 465 connections
+
+### UseStartTls
+
+Upgrade to TLS after initial plain text connection (port 587).
+
+```json
+"UseStartTls": true
+```
+
+- **Type**: `bool`
+- **Required**: No
+- **Default**: `false`
+- **Use Case**: Set to `true` for port 587 (most common)
+
+<Note>
+**SSL vs STARTTLS**:
+- Use `UseSsl: true` for port 465 (SSL from the start)
+- Use `UseStartTls: true` for port 587 (upgrade to TLS)
+- Never use both simultaneously
+</Note>
+
+### User
+
+The SMTP username for authentication.
+
+```json
+"User": "your-email@gmail.com"
+```
+
+- **Type**: `string`
+- **Required**: Yes (for most providers)
+- **Format**: Usually an email address or API key
+
+### Password
+
+The SMTP password or API token.
+
+```json
+"Password": "your-app-password"
+```
+
+- **Type**: `string`
+- **Required**: Yes (for most providers)
+- **Format**: App-specific password or API key
+
+<Warning>
+**Never commit passwords to source control**. Use:
+- User Secrets for development
+- Environment Variables for production
+- Azure Key Vault or similar for enterprise deployments
+</Warning>
+
+### FromEmail
+
+The sender email address that appears in the "From" field.
+
+```json
+"FromEmail": "noreply@andando.com"
+```
+
+- **Type**: `string`
+- **Required**: Yes
+- **Format**: Valid email address
+- **Best Practice**: Use a dedicated email like `noreply@`, `notifications@`, or `support@`
+
+### FromName
+
+The sender name that appears in the "From" field.
+
+```json
+"FromName": "AndanDO"
+```
+
+- **Type**: `string`
+- **Required**: No
+- **Default**: `"AndanDo"` (defined in `SmtpOptions.cs:12`)
+- **Example**: Users see "AndanDO &lt;noreply@andando.com&gt;"
+
+## SmtpOptions Class
+
+The configuration is bound to the `SmtpOptions` class:
+
+```csharp Services/Email/SmtpOptions.cs
+public class SmtpOptions
+{
+    public string Host { get; set; } = string.Empty;
+    public int Port { get; set; }
+    public bool UseSsl { get; set; }
+    public bool UseStartTls { get; set; }
+    public string User { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string FromEmail { get; set; } = string.Empty;
+    public string FromName { get; set; } = "AndanDo";
+}
+```
+
+## EmailService Implementation
+
+The `EmailService` uses MailKit to send emails:
+
+```csharp Services/Email/EmailService.cs
+public class EmailService : IEmailService
+{
+    private readonly SmtpOptions _options;
+
+    public EmailService(IOptions<SmtpOptions> options)
+    {
+        _options = options.Value;
+    }
+
+    public async Task SendHtmlAsync(string to, string subject, string htmlBody)
+    {
+        // Validate configuration
+        if (string.IsNullOrWhiteSpace(_options.Host) || _options.Port <= 0)
+        {
+            throw new InvalidOperationException("La configuración SMTP no es válida.");
+        }
+
+        // Build message
+        var message = new MimeMessage();
+        var fromAddress = new MailboxAddress(_options.FromName ?? "AndanDo", _options.FromEmail);
+        message.From.Add(fromAddress);
+        message.To.Add(MailboxAddress.Parse(to));
+        message.Subject = subject;
+
+        var bodyBuilder = new BodyBuilder
+        {
+            HtmlBody = htmlBody
+        };
+        message.Body = bodyBuilder.ToMessageBody();
+
+        // Determine security mode
+        using var client = new SmtpClient();
+        var secure = _options.UseSsl
+            ? SecureSocketOptions.SslOnConnect
+            : _options.UseStartTls
+                ? SecureSocketOptions.StartTls
+                : SecureSocketOptions.Auto;
+
+        // Connect and send
+        await client.ConnectAsync(_options.Host, _options.Port, secure);
+
+        if (!string.IsNullOrWhiteSpace(_options.User))
+        {
+            await client.AuthenticateAsync(_options.User, _options.Password);
+        }
+
+        await client.SendAsync(message);
+        await client.DisconnectAsync(true);
+    }
+}
+```
+
+## Service Registration
+
+The email service is registered in `Program.cs`:
+
+```csharp Program.cs
+// Bind SMTP configuration
+builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+
+// Register email service
+builder.Services.AddScoped<IEmailService, EmailService>();
+```
+
+## Provider-Specific Configuration
+
+<CodeGroup>
+```json Gmail
+{
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@gmail.com",
+    "Password": "your-app-password",
+    "FromEmail": "your-email@gmail.com",
+    "FromName": "AndanDO"
+  }
+}
+```
+
+```json SendGrid
+{
+  "Smtp": {
+    "Host": "smtp.sendgrid.net",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "apikey",
+    "Password": "SG.your-api-key",
+    "FromEmail": "noreply@andando.com",
+    "FromName": "AndanDO"
+  }
+}
+```
+
+```json AWS SES
+{
+  "Smtp": {
+    "Host": "email-smtp.us-east-1.amazonaws.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-smtp-username",
+    "Password": "your-smtp-password",
+    "FromEmail": "noreply@andando.com",
+    "FromName": "AndanDO"
+  }
+}
+```
+
+```json Microsoft 365 / Outlook
+{
+  "Smtp": {
+    "Host": "smtp.office365.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@outlook.com",
+    "Password": "your-password",
+    "FromEmail": "your-email@outlook.com",
+    "FromName": "AndanDO"
+  }
+}
+```
+
+```json Mailgun
+{
+  "Smtp": {
+    "Host": "smtp.mailgun.org",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "postmaster@your-domain.mailgun.org",
+    "Password": "your-smtp-password",
+    "FromEmail": "noreply@andando.com",
+    "FromName": "AndanDO"
+  }
+}
+```
+</CodeGroup>
+
+## Gmail Setup Guide
+
+<Accordion title="Using Gmail with App Passwords">
+1. **Enable 2-Factor Authentication** on your Google account
+2. Go to [Google Account Security](https://myaccount.google.com/security)
+3. Under "Signing in to Google", select **App passwords**
+4. Generate a new app password for "Mail"
+5. Use the generated 16-character password in your configuration
+
+```json
+{
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseStartTls": true,
+    "User": "your-email@gmail.com",
+    "Password": "abcd efgh ijkl mnop",
+    "FromEmail": "your-email@gmail.com"
+  }
+}
+```
+
+<Warning>
+Gmail has sending limits:
+- 500 emails per day for free accounts
+- 2,000 emails per day for Google Workspace accounts
+
+Consider using a dedicated email service (SendGrid, AWS SES) for production.
+</Warning>
+</Accordion>
+
+## Usage Example
+
+Sending an email from your code:
+
+```csharp
+public class PasswordResetService : IPasswordResetService
+{
+    private readonly IEmailService _emailService;
+
+    public PasswordResetService(IEmailService emailService)
+    {
+        _emailService = emailService;
+    }
+
+    public async Task SendPasswordResetEmailAsync(string email, string resetToken)
+    {
+        var resetLink = $"https://andando.com/reset-password?token={resetToken}";
+        
+        var htmlBody = $@"
+            <html>
+            <body>
+                <h2>Password Reset Request</h2>
+                <p>Click the link below to reset your password:</p>
+                <a href=""{resetLink}"">Reset Password</a>
+                <p>This link will expire in 1 hour.</p>
+            </body>
+            </html>
+        ";
+
+        await _emailService.SendHtmlAsync(
+            to: email,
+            subject: "Reset Your Password - AndanDO",
+            htmlBody: htmlBody
+        );
+    }
+}
+```
+
+## Environment-Specific Configuration
+
+<Accordion title="Development (User Secrets)">
+Store SMTP credentials in User Secrets:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "Smtp:Host" "smtp.gmail.com"
+dotnet user-secrets set "Smtp:Port" "587"
+dotnet user-secrets set "Smtp:UseStartTls" "true"
+dotnet user-secrets set "Smtp:User" "your-email@gmail.com"
+dotnet user-secrets set "Smtp:Password" "your-app-password"
+dotnet user-secrets set "Smtp:FromEmail" "your-email@gmail.com"
+```
+
+Verify:
+```bash
+dotnet user-secrets list
+```
+</Accordion>
+
+<Accordion title="Production (Environment Variables)">
+Use environment variables:
+
+```bash
+export Smtp__Host="smtp.sendgrid.net"
+export Smtp__Port="587"
+export Smtp__UseStartTls="true"
+export Smtp__User="apikey"
+export Smtp__Password="SG.your-api-key"
+export Smtp__FromEmail="noreply@andando.com"
+export Smtp__FromName="AndanDO"
+```
+</Accordion>
+
+<Accordion title="Testing (Disable or Use Mailhog)">
+For testing without sending real emails, use [Mailhog](https://github.com/mailhog/MailHog):
+
+```bash
+# Run Mailhog
+docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
+```
+
+Configure for Mailhog:
+```json
+{
+  "Smtp": {
+    "Host": "localhost",
+    "Port": 1025,
+    "UseSsl": false,
+    "UseStartTls": false,
+    "User": "",
+    "Password": "",
+    "FromEmail": "test@andando.com"
+  }
+}
+```
+
+View emails at: http://localhost:8025
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Invalid SMTP configuration">
+**Error**: `InvalidOperationException: La configuración SMTP no es válida.`
+
+**Cause**: Missing or invalid `Host` or `Port` configuration.
+
+**Solutions**:
+1. Verify `Host` is not empty
+2. Ensure `Port` is greater than 0
+3. Check for typos in configuration keys
+</Accordion>
+
+<Accordion title="Authentication failed">
+**Error**: `AuthenticationException: 535 Authentication failed`
+
+**Solutions**:
+1. Verify username and password are correct
+2. For Gmail, use App Passwords, not your account password
+3. Check if 2FA is required for your email provider
+4. Ensure the account isn't locked or suspended
+</Accordion>
+
+<Accordion title="Connection refused">
+**Error**: `SocketException: Connection refused`
+
+**Solutions**:
+1. Verify the `Host` and `Port` are correct
+2. Check firewall settings allow outbound SMTP connections
+3. Ensure the SMTP server is accessible from your network
+4. Try using telnet to test connectivity: `telnet smtp.gmail.com 587`
+</Accordion>
+
+<Accordion title="SSL/TLS negotiation failed">
+**Error**: `SslHandshakeException: An error occurred while attempting to establish an SSL or TLS connection`
+
+**Solutions**:
+1. Verify `UseSsl` and `UseStartTls` settings match your port
+2. For port 587, use `UseStartTls: true, UseSsl: false`
+3. For port 465, use `UseSsl: true, UseStartTls: false`
+4. Update MailKit NuGet package to the latest version
+</Accordion>
+
+<Accordion title="Sender address rejected">
+**Error**: `SmtpCommandException: 550 Sender address rejected`
+
+**Solutions**:
+1. Verify the `FromEmail` is valid and matches your authenticated account
+2. For Gmail, `FromEmail` must match the authenticated Gmail account
+3. For SendGrid/SES, verify the sender email is verified in the provider
+4. Check SPF/DKIM records are configured for your domain
+</Accordion>
+
+## Best Practices
+
+<Warning>
+**Email Security Checklist**:
+
+- Never commit SMTP passwords to source control
+- Use App Passwords instead of account passwords
+- Enable TLS/STARTTLS for all connections
+- Use a dedicated email service (SendGrid, AWS SES) for production
+- Implement rate limiting to prevent abuse
+- Monitor sending quotas and bounce rates
+- Set up SPF, DKIM, and DMARC records for your domain
+- Use a dedicated subdomain for transactional emails
+</Warning>
+
+<Tip>
+**Email Deliverability Tips**:
+
+- Use a professional "From" address (not personal Gmail)
+- Configure SPF and DKIM records for your domain
+- Include plain text alternative for HTML emails
+- Add unsubscribe links for marketing emails
+- Monitor bounce rates and remove invalid addresses
+- Warm up new sending domains gradually
+- Use dedicated IPs for high-volume sending
+</Tip>
+
+## Email Templates
+
+Consider using a template system for consistent email design:
+
+```csharp
+public static class EmailTemplates
+{
+    public static string WrapInLayout(string content)
+    {
+        return $@"
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset=""utf-8"">
+                <style>
+                    body {{ font-family: Arial, sans-serif; }}
+                    .container {{ max-width: 600px; margin: 0 auto; }}
+                    .header {{ background-color: #007bff; color: white; padding: 20px; }}
+                    .content {{ padding: 20px; }}
+                    .footer {{ background-color: #f8f9fa; padding: 10px; text-align: center; }}
+                </style>
+            </head>
+            <body>
+                <div class=""container"">
+                    <div class=""header"">
+                        <h1>AndanDO</h1>
+                    </div>
+                    <div class=""content"">
+                        {content}
+                    </div>
+                    <div class=""footer"">
+                        <p>&copy; 2024 AndanDO. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        ";
+    }
+}
+```
+
+## Related Pages
+
+- [appsettings.json Overview](/configuration/appsettings)
+- [Password Reset Service](/services/auth)
+- [Notification System](/services/notifications)

@@ -1,0 +1,237 @@
+---
+title: 'Host Dashboard Overview'
+description: 'Manage your tours, bookings, and revenue from the host dashboard'
+icon: 'gauge'
+---
+
+## Overview
+
+The host dashboard provides a comprehensive view of your tour business, allowing you to monitor reservations, track revenue, and manage your published tours from a centralized location.
+
+<Info>
+The dashboard is accessible at `/dashboard/main` and requires authentication as a tour host.
+</Info>
+
+## Dashboard Features
+
+### Key Metrics
+
+The dashboard displays three primary statistics for each selected tour:
+
+<CardGroup cols={3}>
+  <Card title="Total Tickets" icon="ticket">
+    Total number of tickets sold for the selected event
+  </Card>
+  <Card title="Reservations" icon="calendar">
+    Total reservations including all associated bookings
+  </Card>
+  <Card title="Total Sales" icon="dollar-sign">
+    Accumulated revenue from the event
+  </Card>
+</CardGroup>
+
+### Tour Selection
+
+Use the dropdown selector to view statistics for a specific tour:
+
+```razor Components/Pages/Dashboard/Index.razor
+<select class="form-select report-select" @onchange="OnTourChanged">
+    <option value="">— Seleccione un evento para obtener informe —</option>
+    @foreach (var tour in _ownedTours)
+    {
+        <option value="@tour.TourId">@tour.Title (@tour.TourId)</option>
+    }
+</select>
+```
+
+## Reservation Table
+
+The dashboard displays a paginated table of reservations for the selected tour:
+
+### Table Columns
+
+| Column | Description |
+|--------|-------------|
+| **#** | Reservation ID |
+| **Cliente** | Customer name with avatar |
+| **Viaje** | Travel date |
+| **Creada** | Creation timestamp |
+| **Tickets** | Number of tickets |
+| **Total** | Amount paid |
+| **Pago** | Payment status badge |
+| **Actions** | View invoice, edit, cancel |
+
+### Expandable Rows
+
+Click any reservation row to expand and view detailed ticket information:
+
+<Steps>
+  <Step title="View Ticket Details">
+    Expanded rows show individual tickets with:
+    - Ticket type name
+    - Quantity
+    - Unit price
+    - Total amount
+    - QR codes for validation
+  </Step>
+  
+  <Step title="Service Charge Breakdown">
+    View the subtotal, service charges, and total amount breakdown
+  </Step>
+  
+  <Step title="Payment Status">
+    For partial payments, see:
+    - Amount paid
+    - Amount pending
+    - Next charge date
+  </Step>
+</Steps>
+
+## Actions Menu
+
+Each reservation provides the following actions:
+
+### View Invoice
+
+Generate and view the invoice for the reservation:
+
+```csharp Components/Pages/Dashboard/Index.razor:206
+private async Task OpenInvoiceAsync(TourReservationReportDto r)
+{
+    await using var conn = new SqlConnection(_connectionString);
+    await conn.OpenAsync();
+    
+    // Generate invoice HTML
+    var invoiceHtml = await GenerateInvoiceHtmlAsync(r);
+    
+    // Store and navigate
+    await Storage.SetAsync("last_invoice_html", invoiceHtml);
+    Navigation.NavigateTo("/invoice", true);
+}
+```
+
+### Edit Reservation
+
+Modify reservation details (date, contact info, etc.)
+
+<Warning>
+Editing reservations may affect capacity calculations. Ensure sufficient ticket availability.
+</Warning>
+
+### Cancel Order
+
+Cancel a reservation and restore ticket capacity:
+
+```csharp
+private async Task CancelReservation(TourReservationReportDto r)
+{
+    if (r.PaymentStatus == 4) // Already cancelled
+        return;
+        
+    await TourService.UpdateReservationPaymentStatusAsync(
+        r.ReservationId,
+        paymentStatus: 4, // Cancelled
+        paymentProvider: null,
+        paymentReference: null
+    );
+}
+```
+
+<Note>
+Cancelled reservations remain in the database but are marked with status 4.
+</Note>
+
+## QR Code Display
+
+The dashboard includes a modal for viewing individual ticket QR codes:
+
+<Steps>
+  <Step title="Open QR Modal">
+    Click the QR button next to any ticket type in an expanded reservation
+  </Step>
+  
+  <Step title="Navigate Tickets">
+    Use the slider to navigate between individual tickets when multiple tickets of the same type exist
+  </Step>
+  
+  <Step title="Share QR Code">
+    The QR code displays the ticket reservation code for validation at the event
+  </Step>
+</Steps>
+
+### QR Code Generation
+
+QR codes are generated using an external API:
+
+```razor
+<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=@Uri.EscapeDataString(_ticketQrSlides[_ticketQrSlideIndex].Code)&margin=0&color=0c0c3d"
+     alt="QR"
+     width="200" height="200" />
+```
+
+## Loading Reservations
+
+The dashboard loads reservations using the `GetReservationsByTourAsync` method:
+
+```csharp Services/Tour/TourService.cs:1987
+public async Task<IReadOnlyList<TourReservationReportDto>> GetReservationsByTourAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+{
+    var sql = $@"
+    SELECT 
+        r.TourReservationId,
+        r.ReservationCode,
+        r.TravelDate,
+        r.TotalTickets,
+        r.TotalAmount,
+        r.CurrencyCode,
+        r.PaymentStatus,
+        r.ContactName,
+        r.ContactEmail,
+        r.CreatedAt
+    FROM {reservationTable} r
+    WHERE r.TourId = @TourId
+    ORDER BY r.CreatedAt DESC;";
+    
+    // Execute query and map results
+}
+```
+
+## Payment Status Indicators
+
+Reservations display different badges based on payment status:
+
+| Status Code | Label | Badge Class |
+|-------------|-------|-------------|
+| 0 | Pendiente | `badge--warning` |
+| 1 | Pagado | `badge--success` |
+| 2 | Parcial | `badge--info` |
+| 4 | Cancelado | `badge--muted` |
+
+## Mobile View
+
+The dashboard includes a responsive mobile interface with:
+
+- Profile card display
+- Quick action tiles
+- Random tour discovery feature
+- Simplified navigation
+
+<Tip>
+The mobile view is optimized for smaller screens and provides touch-friendly interactions.
+</Tip>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Managing Bookings" icon="calendar-check" href="/hosts/managing-bookings">
+    Learn how to manage and modify reservations
+  </Card>
+  <Card title="Invoices" icon="file-invoice" href="/hosts/invoices">
+    Generate and download customer invoices
+  </Card>
+  <Card title="Statistics" icon="chart-line" href="/hosts/statistics">
+    View detailed revenue analytics
+  </Card>
+</CardGroup>

@@ -1,0 +1,570 @@
+---
+title: Development Setup
+description: Step-by-step guide to configure and run AndanDo locally
+---
+
+## Overview
+
+This guide walks you through setting up AndanDo for local development, from cloning the repository to running the application on your machine.
+
+<Note>
+  Before proceeding, ensure you've met all [System Requirements](/deployment/requirements).
+</Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    Navigate to your workspace directory and clone the source code:
+    
+    ```bash
+    cd ~/workspace/source
+    git clone <repository-url> AndanDo
+    cd AndanDo/AndanDo
+    ```
+  </Step>
+  
+  <Step title="Configure Settings">
+    Update connection strings and API keys in configuration files (detailed below).
+  </Step>
+  
+  <Step title="Restore Dependencies">
+    ```bash
+    dotnet restore
+    ```
+  </Step>
+  
+  <Step title="Build the Project">
+    ```bash
+    dotnet build
+    ```
+  </Step>
+  
+  <Step title="Run the Application">
+    ```bash
+    dotnet run
+    ```
+    
+    Access the app at:
+    - HTTPS: `https://localhost:7129`
+    - HTTP: `http://localhost:5004`
+  </Step>
+</Steps>
+
+## Configuration Files
+
+AndanDo uses two primary configuration files for environment-specific settings:
+
+<CardGroup cols={2}>
+  <Card title="appsettings.json" icon="gear">
+    Base configuration for all environments
+  </Card>
+  <Card title="appsettings.Development.json" icon="code">
+    Development-specific overrides with detailed logging
+  </Card>
+</CardGroup>
+
+### Connection String Configuration
+
+<Warning>
+  **Never commit real credentials to version control!** Use environment variables or user secrets for sensitive data.
+</Warning>
+
+Edit both `appsettings.json` and `appsettings.Development.json`:
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=YOUR_SERVER;Database=AndandoDB;User Id=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=true;"
+  }
+}
+```
+
+<Tabs>
+  <Tab title="Local SQL Server">
+    ```json
+    "DefaultConnection": "Server=localhost;Database=AndandoDB;Integrated Security=true;TrustServerCertificate=true;"
+    ```
+    
+    Uses Windows Authentication (no username/password needed).
+  </Tab>
+  
+  <Tab title="SQL Server Express">
+    ```json
+    "DefaultConnection": "Server=localhost\\SQLEXPRESS;Database=AndandoDB;Integrated Security=true;TrustServerCertificate=true;"
+    ```
+    
+    Note the double backslash for the instance name.
+  </Tab>
+  
+  <Tab title="Remote SQL Server">
+    ```json
+    "DefaultConnection": "Server=your-server.database.windows.net;Database=AndandoDB;User Id=admin;Password=YourSecurePassword123!;TrustServerCertificate=true;"
+    ```
+    
+    Use SQL Server authentication with username and password.
+  </Tab>
+  
+  <Tab title="Azure SQL Database">
+    ```json
+    "DefaultConnection": "Server=tcp:yourserver.database.windows.net,1433;Database=AndandoDB;User ID=admin@yourserver;Password=YourPassword;Encrypt=true;Connection Timeout=30;"
+    ```
+  </Tab>
+</Tabs>
+
+### JWT Configuration
+
+Configure JSON Web Token settings for authentication:
+
+```json
+{
+  "Jwt": {
+    "Issuer": "AndanDo",
+    "Audience": "AndanDo",
+    "SecretKey": "your-secure-secret-key-at-least-32-characters-long",
+    "ExpirationMinutes": 120
+  }
+}
+```
+
+<Info>
+  **Important JWT Settings:**
+  - `SecretKey`: Must be at least 32 characters for HS256 algorithm
+  - `ExpirationMinutes`: Session duration (120 = 2 hours)
+  - Change the default `SecretKey` before deployment!
+</Info>
+
+### SMTP Email Configuration
+
+Configure email service for notifications and password resets:
+
+<CodeGroup>
+```json Gmail
+{
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@gmail.com",
+    "Password": "your-app-specific-password",
+    "FromEmail": "noreply@andando.com.do",
+    "FromName": "AndanDo"
+  }
+}
+```
+
+```json Outlook/Office 365
+{
+  "Smtp": {
+    "Host": "smtp-mail.outlook.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@outlook.com",
+    "Password": "your-password",
+    "FromEmail": "noreply@andando.com.do",
+    "FromName": "AndanDo"
+  }
+}
+```
+
+```json Custom SMTP
+{
+  "Smtp": {
+    "Host": "mail.yourprovider.com",
+    "Port": 465,
+    "UseSsl": true,
+    "UseStartTls": false,
+    "User": "smtp-user",
+    "Password": "smtp-password",
+    "FromEmail": "noreply@andando.com.do",
+    "FromName": "AndanDo"
+  }
+}
+```
+</CodeGroup>
+
+<Tip>
+  For Gmail, generate an App Password:
+  1. Enable 2-factor authentication on your Google account
+  2. Visit [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+  3. Generate a new app password for "Mail"
+  4. Use the 16-character password in your configuration
+</Tip>
+
+### PayPal Configuration
+
+Set up PayPal integration for payment processing:
+
+<Tabs>
+  <Tab title="Sandbox (Development)">
+    ```json
+    {
+      "PayPal": {
+        "Mode": "sandbox",
+        "ClientId": "YOUR_SANDBOX_CLIENT_ID",
+        "ClientSecret": "YOUR_SANDBOX_SECRET",
+        "BaseUrl": "https://api-m.sandbox.paypal.com"
+      }
+    }
+    ```
+    
+    Get sandbox credentials from [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/applications/sandbox).
+  </Tab>
+  
+  <Tab title="Live (Production)">
+    ```json
+    {
+      "PayPal": {
+        "Mode": "live",
+        "ClientId": "YOUR_LIVE_CLIENT_ID",
+        "ClientSecret": "YOUR_LIVE_SECRET",
+        "BaseUrl": "https://api-m.paypal.com"
+      }
+    }
+    ```
+    
+    <Warning>
+      Only use live credentials in production! Keep them secure and never commit to source control.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Database Setup
+
+<Steps>
+  <Step title="Create Database">
+    Connect to your SQL Server instance and create the database:
+    
+    ```sql
+    CREATE DATABASE AndandoDB;
+    GO
+    USE AndandoDB;
+    GO
+    ```
+  </Step>
+  
+  <Step title="Run Database Scripts">
+    Execute the database schema scripts to create tables and stored procedures:
+    
+    <Note>
+      Database schema scripts should be located in a `/Database` or `/Scripts` folder in the repository. Run them in order:
+      1. Table creation scripts
+      2. Stored procedure scripts
+      3. Initial data/seed scripts
+    </Note>
+    
+    If using SQL Server Management Studio (SSMS):
+    - Open the script files
+    - Ensure you're connected to the `AndandoDB` database
+    - Execute each script (F5)
+  </Step>
+  
+  <Step title="Verify Database Objects">
+    Confirm all required objects exist:
+    
+    ```sql
+    -- List all tables
+    SELECT TABLE_NAME 
+    FROM INFORMATION_SCHEMA.TABLES 
+    WHERE TABLE_TYPE = 'BASE TABLE';
+    
+    -- List all stored procedures
+    SELECT ROUTINE_NAME 
+    FROM INFORMATION_SCHEMA.ROUTINES 
+    WHERE ROUTINE_TYPE = 'PROCEDURE';
+    ```
+  </Step>
+</Steps>
+
+### Expected Database Tables
+
+The database should include tables for:
+
+- **Users & Auth**: User accounts, authentication, password resets
+- **Tours**: Tour listings, itineraries, inclusions/exclusions, FAQs
+- **Tickets**: Ticket types, pricing, age categories, sales windows
+- **Reservations**: `TourReservation`, `TourReservationTicket` for booking data
+- **Reviews & Likes**: User reviews, ratings, and post likes
+- **Media**: Tour images and uploads metadata
+
+## Directory Structure
+
+Ensure the following directory structure exists:
+
+```
+AndanDo/
+├── Components/
+│   ├── Pages/               # Blazor pages (Home, Marketplace, TourDetails, etc.)
+│   └── Shared/              # Shared components (NavMenu, SearchBar, etc.)
+├── Services/
+│   ├── Auth/                # Authentication service
+│   ├── JWT/                 # JWT token service
+│   ├── Email/               # Email service
+│   ├── Tour/                # Tour management service
+│   ├── Utility/             # Utility services (likes, reviews, conversion)
+│   └── Paypal/              # PayPal integration
+├── Dtos/                    # Data transfer objects
+├── wwwroot/
+│   ├── uploads/             # User-uploaded tour images (create if missing)
+│   ├── template/            # Invoice templates
+│   ├── css/                 # Stylesheets
+│   └── js/                  # JavaScript files
+├── Properties/
+│   └── launchSettings.json  # Launch profiles
+├── appsettings.json         # Base configuration
+├── appsettings.Development.json  # Dev configuration
+└── Program.cs               # Application entry point
+```
+
+<Warning>
+  **Create the uploads directory manually:**
+  
+  ```bash
+  mkdir -p wwwroot/uploads
+  ```
+  
+  This directory stores user-uploaded tour images and must have write permissions.
+</Warning>
+
+## Build and Run
+
+### Using .NET CLI
+
+<Steps>
+  <Step title="Navigate to Project Directory">
+    ```bash
+    cd ~/workspace/source/AndanDo/AndanDo
+    ```
+  </Step>
+  
+  <Step title="Restore NuGet Packages">
+    ```bash
+    dotnet restore
+    ```
+    
+    This downloads all dependencies:
+    - MailKit v4.14.1
+    - Microsoft.Data.SqlClient v6.1.3
+    - System.IdentityModel.Tokens.Jwt v8.14.0
+    - System.Drawing.Common v8.0.7
+  </Step>
+  
+  <Step title="Build the Project">
+    ```bash
+    dotnet build
+    ```
+    
+    <Info>
+      Build errors? Check that:
+      - .NET 10.0 SDK is installed (or change to `net8.0` in .csproj)
+      - All configuration files are properly formatted
+    </Info>
+  </Step>
+  
+  <Step title="Run the Application">
+    <Tabs>
+      <Tab title="Default (HTTPS)">
+        ```bash
+        dotnet run
+        ```
+        
+        Runs with HTTPS profile, accessible at:
+        - `https://localhost:7129`
+        - `http://localhost:5004`
+      </Tab>
+      
+      <Tab title="HTTP Only">
+        ```bash
+        dotnet run --launch-profile http
+        ```
+        
+        Runs HTTP only at `http://localhost:5004`
+      </Tab>
+      
+      <Tab title="Watch Mode (Hot Reload)">
+        ```bash
+        dotnet watch run
+        ```
+        
+        Automatically rebuilds and restarts when files change.
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+### Using Visual Studio 2022
+
+1. Open `AndanDo.sln` in Visual Studio
+2. Ensure `AndanDo` project is set as startup project
+3. Select launch profile: **https** or **http**
+4. Press **F5** (debug) or **Ctrl+F5** (run without debugging)
+5. Browser opens automatically to `https://localhost:7129`
+
+### Using Visual Studio Code
+
+1. Open the `AndanDo` folder in VS Code
+2. Install recommended extensions (C# Dev Kit)
+3. Press **F5** or use Run > Start Debugging
+4. Select ".NET Core Launch (web)" configuration
+5. Navigate to `https://localhost:7129` in your browser
+
+## Verifying the Setup
+
+<Steps>
+  <Step title="Check Console Output">
+    When the application starts, you should see:
+    
+    ```
+    info: Microsoft.Hosting.Lifetime[14]
+          Now listening on: https://localhost:7129
+    info: Microsoft.Hosting.Lifetime[14]
+          Now listening on: http://localhost:5004
+    info: Microsoft.Hosting.Lifetime[0]
+          Application started. Press Ctrl+C to shut down.
+    ```
+  </Step>
+  
+  <Step title="Access the Homepage">
+    Open a browser and navigate to `https://localhost:7129`
+    
+    You should see:
+    - AndanDo logo and navigation menu
+    - Tour marketplace with cards
+    - Search bar with autocomplete
+    - Recent tours slider
+  </Step>
+  
+  <Step title="Test Database Connection">
+    Try registering a new user or browsing tours. If you see data, the database connection is working correctly.
+    
+    <Warning>
+      If you see database errors, verify:
+      - SQL Server is running
+      - Connection string is correct
+      - Database exists with proper schema
+      - User has necessary permissions
+    </Warning>
+  </Step>
+  
+  <Step title="Check SignalR WebSocket">
+    Open browser DevTools (F12) > Network tab
+    
+    Look for a successful WebSocket connection to `/_blazor?id=...`
+    
+    <Tip>
+      Green "101 Switching Protocols" status means SignalR is connected properly.
+    </Tip>
+  </Step>
+</Steps>
+
+## Common Setup Issues
+
+<AccordionGroup>
+  <Accordion title="Port Already in Use">
+    **Error**: `Unable to bind to https://localhost:7129`
+    
+    **Solution**: Change ports in `Properties/launchSettings.json`:
+    
+    ```json
+    "applicationUrl": "https://localhost:7130;http://localhost:5005"
+    ```
+  </Accordion>
+  
+  <Accordion title="SQL Server Connection Failed">
+    **Error**: `Cannot open database "AndandoDB" requested by the login`
+    
+    **Solutions**:
+    1. Verify SQL Server is running: `services.msc` (Windows) or `systemctl status mssql-server` (Linux)
+    2. Check database exists: Connect with SSMS or Azure Data Studio
+    3. Test connection string with `sqlcmd` or database tool
+    4. Verify user permissions on the database
+  </Accordion>
+  
+  <Accordion title="Certificate Trust Issues (HTTPS)">
+    **Error**: `The SSL connection could not be established`
+    
+    **Solution**: Trust the development certificate:
+    
+    ```bash
+    dotnet dev-certs https --trust
+    ```
+    
+    On Linux, you may need to manually trust the certificate in your browser.
+  </Accordion>
+  
+  <Accordion title="NuGet Package Restore Failed">
+    **Error**: `Unable to find package 'MailKit'`
+    
+    **Solutions**:
+    1. Clear NuGet cache:
+       ```bash
+       dotnet nuget locals all --clear
+       ```
+    2. Restore with verbose logging:
+       ```bash
+       dotnet restore --verbosity detailed
+       ```
+    3. Check NuGet sources:
+       ```bash
+       dotnet nuget list source
+       ```
+  </Accordion>
+  
+  <Accordion title="Upload Directory Permissions">
+    **Error**: `Access denied when saving file to wwwroot/uploads`
+    
+    **Solution**: Ensure the directory exists and has write permissions:
+    
+    ```bash
+    # Create directory
+    mkdir -p wwwroot/uploads
+    
+    # Set permissions (Linux/macOS)
+    chmod 755 wwwroot/uploads
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Development Workflow
+
+<CardGroup cols={2}>
+  <Card title="Hot Reload" icon="fire">
+    Use `dotnet watch run` for automatic recompilation on file changes
+  </Card>
+  <Card title="Database Changes" icon="database">
+    Execute SQL scripts directly in SSMS or run migrations as needed
+  </Card>
+  <Card title="Testing Features" icon="vial">
+    Use PayPal sandbox, test email addresses, and dummy data
+  </Card>
+  <Card title="Debugging" icon="bug">
+    Attach debugger in Visual Studio or VS Code, set breakpoints in C# code
+  </Card>
+</CardGroup>
+
+### Useful Development Commands
+
+```bash
+# Clean build artifacts
+dotnet clean
+
+# Rebuild from scratch
+dotnet clean && dotnet build
+
+# Run with specific environment
+dotnet run --environment Development
+
+# Publish for local testing
+dotnet publish -c Debug
+
+# List all project dependencies
+dotnet list package
+```
+
+## Next Steps
+
+<Card title="Production Deployment" icon="rocket" href="/deployment/production">
+  Learn how to deploy AndanDo to production environments with IIS, Azure, or Docker
+</Card>

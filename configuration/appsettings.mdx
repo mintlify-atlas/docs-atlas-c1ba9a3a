@@ -1,0 +1,246 @@
+---
+title: 'appsettings.json'
+description: 'Complete reference for appsettings.json configuration file'
+icon: 'gear'
+---
+
+## Overview
+
+The `appsettings.json` file is the central configuration file for AndanDo. It contains all application settings including database connection strings, JWT authentication, email configuration, PayPal integration, and logging settings.
+
+<Info>
+The configuration file is located at the root of the AndanDo project: `~/AndanDo/appsettings.json`
+</Info>
+
+## Configuration Structure
+
+The appsettings.json file is divided into several main sections:
+
+<CodeGroup>
+```json Complete Configuration
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=your-server;Database=AndandoDB;User Id=your-user;Password=your-password;TrustServerCertificate=true;"
+  },
+  "Jwt": {
+    "Issuer": "AndanDo",
+    "Audience": "AndanDo",
+    "SecretKey": "your-secret-key-min-32-characters",
+    "ExpirationMinutes": 120
+  },
+  "Smtp": {
+    "Host": "smtp.gmail.com",
+    "Port": 587,
+    "UseSsl": false,
+    "UseStartTls": true,
+    "User": "your-email@gmail.com",
+    "Password": "your-app-password",
+    "FromEmail": "noreply@andando.com",
+    "FromName": "AndanDO"
+  },
+  "PayPal": {
+    "Mode": "sandbox",
+    "ClientId": "your-paypal-client-id",
+    "ClientSecret": "your-paypal-client-secret",
+    "BaseUrl": "https://api-m.sandbox.paypal.com"
+  }
+}
+```
+</CodeGroup>
+
+## Configuration Sections
+
+### Logging
+
+Controls application logging behavior using ASP.NET Core's built-in logging framework.
+
+```json
+"Logging": {
+  "LogLevel": {
+    "Default": "Information",
+    "Microsoft.AspNetCore": "Warning"
+  }
+}
+```
+
+| Property | Description | Values |
+|----------|-------------|--------|
+| `Default` | Default log level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None` |
+| `Microsoft.AspNetCore` | Log level for ASP.NET Core framework messages | Same as above |
+
+<Tip>
+In production, set `Default` to `Warning` or `Error` to reduce log noise and improve performance.
+</Tip>
+
+### AllowedHosts
+
+Specifies which hosts are allowed to access the application.
+
+```json
+"AllowedHosts": "*"
+```
+
+<Warning>
+Using `"*"` allows all hosts. In production, specify exact domains:
+```json
+"AllowedHosts": "andando.com;www.andando.com"
+```
+</Warning>
+
+### ConnectionStrings
+
+Defines database connection strings. See [Database Configuration](/configuration/database) for detailed information.
+
+```json
+"ConnectionStrings": {
+  "DefaultConnection": "Server=localhost;Database=AndandoDB;..."
+}
+```
+
+### JWT Configuration
+
+Configures JWT token generation for API authentication. See [JWT Configuration](/configuration/jwt) for detailed information.
+
+```json
+"Jwt": {
+  "Issuer": "AndanDo",
+  "Audience": "AndanDo",
+  "SecretKey": "your-secret-key",
+  "ExpirationMinutes": 120
+}
+```
+
+### SMTP Configuration
+
+Configures email sending via SMTP. See [Email Configuration](/configuration/email) for detailed information.
+
+```json
+"Smtp": {
+  "Host": "smtp.gmail.com",
+  "Port": 587,
+  "UseSsl": false,
+  "UseStartTls": true,
+  "User": "your-email@gmail.com",
+  "Password": "your-password",
+  "FromEmail": "noreply@andando.com",
+  "FromName": "AndanDO"
+}
+```
+
+### PayPal Configuration
+
+Configures PayPal payment integration. See [PayPal Configuration](/configuration/paypal) for detailed information.
+
+```json
+"PayPal": {
+  "Mode": "sandbox",
+  "ClientId": "your-client-id",
+  "ClientSecret": "your-client-secret",
+  "BaseUrl": "https://api-m.sandbox.paypal.com"
+}
+```
+
+## Loading Configuration in Program.cs
+
+Configuration sections are bound to strongly-typed options classes in `Program.cs`:
+
+```csharp Program.cs
+// JWT Configuration
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+// SMTP Configuration
+builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+// PayPal Configuration
+builder.Services.Configure<PaypalOptions>(builder.Configuration.GetSection("PayPal"));
+builder.Services.AddHttpClient<IPaypalService, PaypalService>();
+```
+
+## Environment-Specific Configuration
+
+<Accordion title="Using appsettings.Development.json">
+Create environment-specific configuration files that override base settings:
+
+```json appsettings.Development.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Debug",
+      "Microsoft.AspNetCore": "Information"
+    }
+  },
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=AndandoDB_Dev;..."
+  },
+  "PayPal": {
+    "Mode": "sandbox"
+  }
+}
+```
+
+ASP.NET Core automatically loads the environment-specific file based on the `ASPNETCORE_ENVIRONMENT` variable.
+</Accordion>
+
+<Accordion title="Using User Secrets (Development)">
+For sensitive data in development, use User Secrets instead of committing credentials:
+
+```bash
+# Initialize user secrets
+dotnet user-secrets init
+
+# Set a secret
+dotnet user-secrets set "Jwt:SecretKey" "your-dev-secret-key"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "your-connection-string"
+```
+
+User secrets override appsettings.json values during development.
+</Accordion>
+
+<Accordion title="Using Environment Variables (Production)">
+In production, use environment variables to override configuration:
+
+```bash
+# Format: Section__Property
+export ConnectionStrings__DefaultConnection="Server=prod-server;..."
+export Jwt__SecretKey="production-secret-key"
+export Smtp__Password="production-smtp-password"
+```
+
+Environment variables have the highest priority in the configuration hierarchy.
+</Accordion>
+
+## Security Best Practices
+
+<Warning>
+**Never commit sensitive data to source control**
+
+- Use User Secrets for development
+- Use Environment Variables or Azure Key Vault for production
+- Add `appsettings.*.json` files with secrets to `.gitignore`
+- Rotate secrets regularly
+</Warning>
+
+<Note>
+**Configuration Priority Order** (highest to lowest):
+1. Environment Variables
+2. User Secrets (Development only)
+3. appsettings.{Environment}.json
+4. appsettings.json
+5. Default values in Options classes
+</Note>
+
+## Related Pages
+
+- [Database Configuration](/configuration/database)
+- [JWT Configuration](/configuration/jwt)
+- [Email Configuration](/configuration/email)
+- [PayPal Configuration](/configuration/paypal)

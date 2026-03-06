@@ -1,0 +1,429 @@
+---
+title: 'Making Reservations'
+description: 'Complete guide to booking tours on AndanDo'
+---
+
+## Overview
+
+AndanDo provides a streamlined, multi-step reservation process that guides you from tour discovery to confirmed booking. This guide covers the entire booking workflow, payment options, and what to expect after completing your reservation.
+
+## Starting a Reservation
+
+<Steps>
+  <Step title="Browse and Select">
+    Navigate to `/marketplace` or use `/search` to find tours. Click any tour card to view details at `/tours/details/{TourId}`.
+  </Step>
+  
+  <Step title="Review Tour Details">
+    The tour details page (`TourDetails.razor`) displays:
+    - High-resolution image gallery with lightbox
+    - Complete tour information (duration, location, capacity)
+    - Owner/provider details with ratings
+    - Available ticket types and pricing
+    - Customer reviews
+  </Step>
+  
+  <Step title="Open Booking Panel">
+    On desktop, the booking card is sticky on the right side. On mobile, tap the floating CTA button to reveal the booking panel.
+  </Step>
+</Steps>
+
+<Info>
+  The booking interface is responsive: desktop users see a sticky sidebar (`booking-sticky`), while mobile users access a slide-up panel (`mobile-booking-panel`).
+</Info>
+
+## Ticket Selection
+
+### Understanding Ticket Types
+
+Tours can offer multiple ticket types with different pricing:
+
+<CardGroup cols={2}>
+  <Card title="Standard Tickets" icon="ticket">
+    Regular admission with base pricing
+  </Card>
+  
+  <Card title="VIP/Premium" icon="star">
+    Enhanced experiences with additional amenities
+  </Card>
+  
+  <Card title="Group Rates" icon="users">
+    Discounted pricing for larger parties
+  </Card>
+  
+  <Card title="Date-Specific" icon="calendar">
+    Tickets available only for certain dates or times
+  </Card>
+</CardGroup>
+
+### Ticket Status Indicators
+
+Tickets may display status badges:
+
+<Accordion title="Próximamente (Upcoming)">
+  Tickets not yet on sale. Displayed when `VentaInicioUtc` is in the future:
+  
+  ```csharp
+  var isUpcoming = ticket.VentaInicioUtc.HasValue && 
+                   ticket.VentaInicioUtc.Value > DateTime.UtcNow;
+  ```
+  
+  These tickets are disabled and cannot be selected.
+</Accordion>
+
+<Accordion title="Agotado (Sold Out)">
+  Tickets that have reached capacity. Selection is disabled.
+</Accordion>
+
+<Accordion title="Disponible (Available)">
+  Active tickets within their sale period. Ready for purchase.
+</Accordion>
+
+### Selecting Quantities
+
+For each available ticket type:
+
+1. **Click the minus/plus buttons** to adjust quantity
+2. **Quantity spinners** show when processing changes
+3. **Price updates** automatically in the summary panel
+4. **Maximum capacity** is enforced per ticket type
+
+<Note>
+  The ticket selection interface uses real-time validation to prevent over-booking and enforces minimum/maximum order quantities.
+</Note>
+
+## The Reservation Modal
+
+Clicking **"Reservar Ahora"** opens the premium reservation modal (`rmodal`), which uses a 4-step wizard:
+
+### Step 1: Booking Information
+
+<Steps>
+  <Step title="Tour Summary">
+    Review selected tickets and quantities in the sticky right-side summary card:
+    
+    ```razor
+    <div class="rmodal__summary-card">
+        <div class="rmodal__summary-card__label">Resumen de Reserva</div>
+        @foreach (var item in SelectedTickets)
+        {
+            <div class="rmodal__summary-row">
+                <span>@item.Name <span class="rmodal__qty">×@item.Qty</span></span>
+                <span>@FormatPrice(item.Total)</span>
+            </div>
+        }
+    </div>
+    ```
+  </Step>
+  
+  <Step title="Contact Information">
+    Fill in required fields:
+    - **Nombre completo** (Full name with person icon)
+    - **Correo electrónico** (Email with envelope icon)
+    - **Teléfono** (Phone with phone icon)
+    - **Comentarios** (Optional notes in textarea)
+    
+    All inputs feature focus states with orange accent color (#eb662b).
+  </Step>
+  
+  <Step title="Currency Conversion">
+    Select your preferred currency from the dropdown:
+    - DOP (Dominican Peso) - default
+    - USD (US Dollar)
+    - EUR (Euro)
+    
+    The converted price displays below in real-time using `CurrencyConversionService`.
+  </Step>
+</Steps>
+
+<Tip>
+  If you're logged in, your contact information may be pre-filled from your profile using the `UserSession` service.
+</Tip>
+
+### Step 2: Review Order
+
+Confirm your reservation details:
+
+- **Order list** showing all selected tickets with quantities
+- **Optional extras** with descriptions and pricing
+- **Total amount** prominently displayed in a gradient card
+- **Service fee note** (if applicable)
+
+```razor
+<div class="rmodal__order-total">
+    <span>Total</span>
+    <span>@FormatDop(CalculateTotal())</span>
+</div>
+```
+
+### Step 3: Payment Method Selection
+
+Choose how you'd like to pay:
+
+<CardGroup cols={3}>
+  <Card title="Pago Completo" icon="credit-card">
+    Pay the full amount upfront
+  </Card>
+  
+  <Card title="50% Inicial" icon="hand-holding-dollar">
+    Pay 50% now, remainder later
+  </Card>
+  
+  <Card title="Reserva (10%)" icon="bookmark">
+    Secure with 10% deposit
+  </Card>
+</CardGroup>
+
+The selected payment card highlights with:
+- Orange gradient background
+- Animated checkmark icon
+- Box shadow for emphasis
+
+```css
+.rmodal__pay-card.-active {
+    border-color: #eb662b;
+    background: linear-gradient(135deg, #fff4ef, #fffaf7);
+    box-shadow: 0 4px 16px rgba(235,102,43,.12);
+}
+```
+
+### Step 4: Payment & Confirmation
+
+The final step shows:
+
+<Steps>
+  <Step title="Payment Amount">
+    Large display of the amount due now in a dark gradient callout:
+    
+    ```razor
+    <div class="rmodal__pay-callout">
+        <div class="rmodal__pay-callout__label">Monto a Pagar Ahora</div>
+        <div class="rmodal__pay-callout__amount">@FormatDop(AmountDue)</div>
+    </div>
+    ```
+  </Step>
+  
+  <Step title="Pending Balance">
+    If using partial payment, remaining balance and due date are shown.
+  </Step>
+  
+  <Step title="Confirm Reservation">
+    Click **"Confirmar Reserva"** to process the booking. A spinner indicates processing.
+  </Step>
+</Steps>
+
+## Reservation Timer
+
+When the modal is open, a floating timer pill appears in the bottom-right corner:
+
+<Note>
+  The timer gives you a limited time to complete your reservation. This ensures ticket availability for other users.
+</Note>
+
+Timer features:
+- **Countdown display** (e.g., "4:32 remaining")
+- **Progress bar** showing time remaining visually  
+- **Urgent state** when under 1 minute (red background with pulse animation)
+- **Auto-close** when time expires
+
+```css
+.rmodal__timer-pill.-urgent {
+    background: rgba(185, 28, 28, 0.92);
+    animation: timerPulse 0.85s ease-in-out infinite;
+}
+```
+
+<Tip>
+  If your timer expires, simply start a new reservation. Your ticket selection won't be saved.
+</Tip>
+
+## Success Confirmation
+
+After successful booking, you'll see:
+
+<Steps>
+  <Step title="Success Animation">
+    Animated checkmark icon in an orange gradient circle with pulse effect:
+    
+    ```css
+    @keyframes rmodalPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(235,102,43,.3); }
+        50%       { box-shadow: 0 0 0 12px rgba(235,102,43,0); }
+    }
+    ```
+  </Step>
+  
+  <Step title="Reservation Summary Card">
+    Displays:
+    - Confirmation number
+    - Tour name
+    - Reservation date
+    - Amount paid (highlighted in orange)
+    - Payment status
+  </Step>
+  
+  <Step title="Email Confirmation">
+    A confirmation email is sent to your registered address using `IEmailService`.
+  </Step>
+  
+  <Step title="Next Actions">
+    Options to:
+    - Close modal and return to tour details
+    - View your reservations
+    - Browse more tours
+  </Step>
+</Steps>
+
+## Tour Details Features
+
+The tour details page offers several interactive features:
+
+### Image Gallery
+
+Click any tour image to open the fullscreen lightbox:
+
+- **Navigation arrows** to browse images
+- **Counter** showing current image number
+- **Close button** (X) in top-right
+- **Keyboard support** for Esc and arrow keys
+
+```css
+.tour-lightbox-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 9999;
+}
+```
+
+### Location Map
+
+Integrated Google Maps showing:
+- **Tour starting location** with marker
+- **"Cómo llegar" button** to open directions in Google Maps
+- **Map type controls** for satellite/street view
+
+<Accordion title="Route Modal">
+  Clicking **"Ver ruta detallada"** opens a modal with:
+  - Embedded directions map
+  - Distance and duration metrics
+  - Step-by-step navigation
+  - Link to open in Google Maps app
+</Accordion>
+
+### Share Tour
+
+Share button with popover menu for:
+- **Copy link** to clipboard
+- **WhatsApp** share
+- **Facebook** share
+- **Twitter** share
+
+```razor
+<div class="share-menu__popover">
+    <button class="share-menu__item share-menu__item--button" @onclick="CopyLink">
+        <i class="icon-copy"></i> Copiar enlace
+    </button>
+    <a class="share-menu__item" href="@WhatsAppShareUrl" target="_blank">
+        <i class="icon-whatsapp"></i> WhatsApp
+    </a>
+</div>
+```
+
+## Mobile Booking Flow
+
+On screens under 992px, the booking experience adapts:
+
+<Steps>
+  <Step title="Floating CTA Button">
+    A sticky button appears at the bottom of the screen:
+    
+    ```css
+    .mobile-booking-cta {
+        position: fixed;
+        bottom: 18px;
+        background: #0c0c3d;
+        border-radius: 14px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+    }
+    ```
+  </Step>
+  
+  <Step title="Slide-Up Panel">
+    Tapping the CTA reveals a bottom sheet with ticket selection and booking controls.
+  </Step>
+  
+  <Step title="Backdrop Overlay">
+    Semi-transparent overlay prevents interaction with page content while panel is open.
+  </Step>
+</Steps>
+
+## Payment Processing
+
+While the UI shows the payment flow, actual payment gateway integration depends on your AndanDo configuration. The reservation system supports:
+
+- **Multiple currencies** via `ICurrencyConversionService`
+- **Partial payment plans** (full, 50%, 10%)
+- **Payment tracking** in the database
+- **Email notifications** for confirmations and reminders
+
+<Warning>
+  Always verify the final amount before confirming. Currency conversions use live exchange rates and may fluctuate.
+</Warning>
+
+## Tour Availability
+
+### Upcoming Tours
+
+Tours marked as "Próximamente" (`IsUpcoming = true`):
+- Display placeholder instead of image
+- Show availability date
+- Disable booking until start date
+- Cannot be clicked for details
+
+Logic from `Marketplace.razor:974`:
+
+```csharp
+var isUpcoming = !muestra && start.HasValue && start.Value > now;
+```
+
+### Visibility Window
+
+Tours only appear if:
+1. Current date is before `EndDate` (if set)
+2. Either `MuestraInstantanea` is true, OR current date is within 3 days of `StartDate`
+3. Status is not "I" (inactive)
+
+## Owner Information
+
+Each tour details page displays the tour provider:
+
+<CardGroup cols={2}>
+  <Card title="Owner Profile" icon="user">
+    Avatar, name, and "Tour Provider" subtitle
+  </Card>
+  
+  <Card title="Rating Chip" icon="star">
+    Aggregate rating from all the owner's tours with review count
+  </Card>
+</CardGroup>
+
+Owner ratings are calculated by `IReviewService.GetOwnerRatingAsync()`:
+
+```csharp
+public async Task<(double? AvgRating, int RatingCount)> GetOwnerRatingAsync(
+    int ownerUserId,
+    CancellationToken cancellationToken = default)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browsing Tours" icon="compass" href="/guides/browsing-tours">
+    Learn how to discover and filter tours effectively
+  </Card>
+  
+  <Card title="Reviews & Likes" icon="heart" href="/guides/reviews-and-likes">
+    Share your experience and save favorite tours
+  </Card>
+</CardGroup>

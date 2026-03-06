@@ -1,0 +1,459 @@
+---
+title: 'Managing Tour Details'
+description: 'Configure itinerary, FAQs, inclusions, and location details for your tours'
+icon: 'list-check'
+---
+
+## Overview
+
+Tour details are the information layers that make your offering complete. After creating the basic tour structure, you'll add itinerary steps, FAQs, inclusions/exclusions, hero info cards, and location data.
+
+<Note>
+  All detail sections are optional but highly recommended for better conversion rates. Tours with complete information get 3x more bookings.
+</Note>
+
+## Itinerary Management
+
+The itinerary shows customers what to expect day-by-day during your tour.
+
+### Creating Itinerary Steps
+
+<Steps>
+  <Step title="Access Step 3 of Tour Creation">
+    Navigate to the "Itinerary & FAQs" section in the tour wizard.
+  </Step>
+
+  <Step title="Add a New Day">
+    Click "Add Itinerary Day" to create a collapsible accordion entry.
+    
+    ```razor
+    <div class="itin-accordion">
+      <div class="itin-accordion__header">
+        <span class="itin-num">@dayNumber</span>
+        <span class="itin-title">@step.Title</span>
+        <span class="itin-day-badge">Día @dayNumber</span>
+      </div>
+      <div class="itin-accordion__body">
+        <!-- Step content -->
+      </div>
+    </div>
+    ```
+  </Step>
+
+  <Step title="Fill Step Details">
+    Provide:
+    - **Day Number:** Auto-incremented (Day 1, Day 2, etc.)
+    - **Title:** Brief heading for the day
+    - **Description (HTML):** Detailed activities and highlights
+  </Step>
+
+  <Step title="Reorder with Drag & Drop">
+    Use the drag handle (⋮⋮) to reorder days. The system auto-updates `SortOrder`.
+  </Step>
+</Steps>
+
+### Itinerary Data Structure
+
+```csharp
+public record TourItineraryStepRequest(
+    string DayNumber,       // "1", "Day 2", "Día 3"
+    string Title,           // "Arrival and Check-in"
+    string DescriptionHtml, // "<p>Meet at hotel...</p>"
+    int SortOrder);         // Display order
+```
+
+### Storing Itinerary Steps
+
+The `UpsertItineraryAsync` method processes itinerary data:
+
+```csharp
+public async Task UpsertItineraryAsync(
+    int tourId,
+    IEnumerable<TourItineraryStepRequest> itinerary,
+    CancellationToken cancellationToken = default)
+{
+    if (itinerary is null) return;
+
+    using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var step in itinerary)
+    {
+        using var command = new SqlCommand("sp_TourItineraryItem_Insert", connection)
+        {
+            CommandType = CommandType.StoredProcedure
+        };
+
+        command.Parameters.AddWithValue("@TourId", tourId);
+
+        // Extract digits from DayNumber ("Day 1" → 1)
+        int dayNumber = 0;
+        if (!string.IsNullOrWhiteSpace(step.DayNumber))
+        {
+            var digits = new string(step.DayNumber.Where(char.IsDigit).ToArray());
+            if (!string.IsNullOrWhiteSpace(digits))
+            {
+                int.TryParse(digits, out dayNumber);
+            }
+        }
+
+        command.Parameters.AddWithValue("@DayNumber", dayNumber);
+        command.Parameters.AddWithValue("@Title", step.Title ?? string.Empty);
+        command.Parameters.AddWithValue("@DescriptionHtml", (object?)step.DescriptionHtml ?? DBNull.Value);
+        command.Parameters.AddWithValue("@SortOrder", step.SortOrder);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
+```
+
+<Accordion title="Itinerary Best Practices">
+  - Use 3-7 days for multi-day tours
+  - Include approximate times for activities
+  - Mention meal arrangements
+  - Highlight unique experiences
+  - Keep descriptions between 50-150 words per day
+  - Use bullet points for readability
+</Accordion>
+
+## FAQ Management
+
+Frequently Asked Questions help reduce customer support inquiries.
+
+### Adding FAQs
+
+<CardGroup cols={2}>
+  <Card title="Question" icon="question">
+    The customer's question. Keep it concise (5-10 words).
+    
+    **Example:** "What should I bring?"
+  </Card>
+
+  <Card title="Answer (HTML)" icon="comment">
+    Detailed response supporting HTML formatting.
+    
+    **Example:** `<p>Bring comfortable shoes and a water bottle.</p>`
+  </Card>
+</CardGroup>
+
+### FAQ Data Structure
+
+```csharp
+public record TourFaqRequest(
+    string Question,   // Customer question
+    string AnswerHtml, // HTML answer
+    int SortOrder);    // Display order
+```
+
+### Storing FAQs
+
+```csharp
+public async Task UpsertFaqAsync(
+    int tourId,
+    IEnumerable<TourFaqRequest> faqs,
+    CancellationToken cancellationToken = default)
+{
+    if (faqs is null) return;
+
+    using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var faq in faqs)
+    {
+        using var command = new SqlCommand("sp_TourFaq_Insert", connection)
+        {
+            CommandType = CommandType.StoredProcedure
+        };
+
+        command.Parameters.AddWithValue("@TourId", tourId);
+        command.Parameters.AddWithValue("@Question", faq.Question ?? string.Empty);
+        command.Parameters.AddWithValue("@AnswerHtml", (object?)faq.AnswerHtml ?? DBNull.Value);
+        command.Parameters.AddWithValue("@SortOrder", faq.SortOrder);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
+```
+
+<Accordion title="Common FAQ Topics">
+  Recommended FAQs to include:
+  
+  - What's included in the price?
+  - What should I bring?
+  - Is transportation provided?
+  - What's the cancellation policy?
+  - Are meals included?
+  - What's the physical difficulty level?
+  - Can children participate?
+  - What happens if it rains?
+</Accordion>
+
+## Inclusions & Exclusions
+
+Clearly communicate what's included (and excluded) in your tour price.
+
+### Inclusion Types
+
+<CardGroup cols={2}>
+  <Card title="Included Items" icon="check" iconType="solid">
+    Items covered by the tour price.
+    
+    **Examples:**
+    - Hotel pickup and drop-off
+    - Professional tour guide
+    - Entrance fees to attractions
+    - Lunch and refreshments
+  </Card>
+
+  <Card title="Excluded Items" icon="xmark" iconType="solid">
+    Items NOT covered by the tour price.
+    
+    **Examples:**
+    - Personal expenses
+    - Travel insurance
+    - Optional gratuities
+    - Alcoholic beverages
+  </Card>
+</CardGroup>
+
+### Inclusion Data Structure
+
+```csharp
+public record TourInclusionRequest(
+    string Text,      // Description of item
+    bool IsIncluded,  // true = included, false = excluded
+    int SortOrder);   // Display order
+```
+
+### Storing Inclusions
+
+```csharp
+public async Task UpsertInclusionsAsync(
+    int tourId,
+    IEnumerable<TourInclusionRequest> inclusions,
+    CancellationToken cancellationToken = default)
+{
+    if (inclusions is null) return;
+
+    using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var item in inclusions)
+    {
+        using var command = new SqlCommand("sp_TourInclusion_Insert", connection)
+        {
+            CommandType = CommandType.StoredProcedure
+        };
+
+        command.Parameters.AddWithValue("@TourId", tourId);
+        command.Parameters.AddWithValue("@IsIncluded", item.IsIncluded);
+        command.Parameters.AddWithValue("@Text", item.Text ?? string.Empty);
+        command.Parameters.AddWithValue("@SortOrder", item.SortOrder);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
+```
+
+## Hero Info Cards
+
+Hero cards display key tour information at a glance (duration, group size, etc.).
+
+### Creating Info Items
+
+<Steps>
+  <Step title="Add Info Card">
+    Click "Add Info Item" in Step 2 of the wizard.
+  </Step>
+
+  <Step title="Select Icon">
+    Choose from available icons:
+    - `icon-clock` for duration
+    - `icon-calendar` for dates
+    - `icon-person` for group size
+    - `icon-flag` for languages
+  </Step>
+
+  <Step title="Set Label & Value">
+    - **Label:** "Duration"
+    - **Value:** "3 hours"
+  </Step>
+</Steps>
+
+### Info Item Data Structure
+
+```csharp
+public record TourInfoItemRequest(
+    string Label,   // "Duration", "Group Size"
+    string Value,   // "3 hours", "Max 15 people"
+    string Icon,    // "icon-clock", "icon-person"
+    int SortOrder); // Display order
+```
+
+### Storing Info Items
+
+```csharp
+public async Task UpsertHeroInfoAsync(
+    int tourId,
+    IEnumerable<TourInfoItemRequest> infoItems,
+    CancellationToken cancellationToken = default)
+{
+    if (infoItems is null) return;
+
+    using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    foreach (var item in infoItems)
+    {
+        using var command = new SqlCommand("sp_TourInfoItem_Insert", connection)
+        {
+            CommandType = CommandType.StoredProcedure
+        };
+
+        command.Parameters.AddWithValue("@TourId", tourId);
+        command.Parameters.AddWithValue("@Label", item.Label ?? string.Empty);
+        command.Parameters.AddWithValue("@Value", item.Value ?? string.Empty);
+        command.Parameters.AddWithValue("@IconKey", (object?)item.Icon ?? DBNull.Value);
+        command.Parameters.AddWithValue("@SortOrder", item.SortOrder);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
+```
+
+<Tip>
+  Use 3-5 hero info cards for optimal visual balance. Too many cards can overwhelm customers.
+</Tip>
+
+## Location Details
+
+Add Google Maps or Waze links to show the meeting point.
+
+### Adding Location URLs
+
+```csharp
+public record ServicioUbicacionRequest(
+    string Url); // Google Maps or Waze URL
+```
+
+### Storing Locations
+
+```csharp
+public async Task UpsertServiceLocationsAsync(
+    int tourId,
+    IEnumerable<ServicioUbicacionRequest> locations,
+    CancellationToken cancellationToken = default)
+{
+    if (tourId <= 0 || locations is null)
+    {
+        return;
+    }
+
+    var cleaned = locations
+        .Select(x => x.Url?.Trim())
+        .Where(x => !string.IsNullOrWhiteSpace(x))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    if (!cleaned.Any())
+    {
+        return;
+    }
+
+    await using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        INSERT INTO ServicioUbicaciones (ServicioId, Url, Activo, CreadoEn)
+        VALUES (@ServicioId, @Url, 1, SYSUTCDATETIME());
+    """;
+
+    foreach (var url in cleaned)
+    {
+        await using var command = new SqlCommand(sql, connection);
+        command.Parameters.Add(new SqlParameter("@ServicioId", SqlDbType.Int) { Value = tourId });
+        command.Parameters.Add(new SqlParameter("@Url", SqlDbType.NVarChar, 800) { Value = url! });
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+}
+```
+
+<Info>
+  The system automatically detects duplicate URLs and removes them. Only unique, active location links are stored.
+</Info>
+
+## Editing Tour Details
+
+To edit existing tour details:
+
+1. Navigate to `/tours/edit/{tourId}`
+2. The wizard loads existing data via `GetTourFullByIdAsync`
+3. Modify any section
+4. Save changes with `UpdateTourAsync`
+
+```csharp
+public async Task UpdateTourAsync(
+    int tourId,
+    TourRegistrationRequest request,
+    bool isActive,
+    CancellationToken cancellationToken = default)
+{
+    if (tourId <= 0)
+    {
+        return;
+    }
+
+    await using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+
+    var tourTable = await ResolveTourTableAsync(connection, cancellationToken);
+    if (string.IsNullOrWhiteSpace(tourTable))
+    {
+        throw new InvalidOperationException("Could not determine Tour/Tours table.");
+    }
+
+    var sql = $@"
+UPDATE {tourTable}
+SET Title = @Title,
+    LocationLabel = @LocationLabel,
+    ImageList = @ImageList,
+    DescriptionHtml = @DescriptionHtml,
+    ShortDescription = @ShortDescription,
+    IsActive = @IsActive,
+    MuestraInstantanea = @MuestraInstantanea,
+    UpdatedAt = SYSUTCDATETIME()
+WHERE TourId = @TourId;";
+
+    await using var command = new SqlCommand(sql, connection);
+    command.Parameters.AddWithValue("@TourId", tourId);
+    command.Parameters.AddWithValue("@Title", request.Title ?? string.Empty);
+    command.Parameters.AddWithValue("@LocationLabel", request.LocationLabel ?? string.Empty);
+    command.Parameters.AddWithValue("@ImageList", (object?)request.ImageList ?? DBNull.Value);
+    command.Parameters.AddWithValue("@DescriptionHtml", (object?)request.DescriptionHtml ?? DBNull.Value);
+    command.Parameters.AddWithValue("@ShortDescription", (object?)request.ShortDescription ?? DBNull.Value);
+    command.Parameters.AddWithValue("@IsActive", isActive);
+    command.Parameters.AddWithValue("@MuestraInstantanea", request.MuestraInstantanea);
+
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ticket Types" icon="ticket" href="/hosts/ticket-types">
+    Configure ticket categories and capacity
+  </Card>
+
+  <Card title="Extras & Add-ons" icon="cart-plus" href="/hosts/extras-and-addons">
+    Add optional extras to increase revenue
+  </Card>
+
+  <Card title="Pricing" icon="dollar-sign" href="/hosts/pricing">
+    Set up pricing strategies
+  </Card>
+
+  <Card title="Dashboard" icon="chart-line" href="/hosts/dashboard">
+    Monitor bookings and performance
+  </Card>
+</CardGroup>

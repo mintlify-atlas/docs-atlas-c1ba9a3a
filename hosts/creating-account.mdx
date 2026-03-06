@@ -1,0 +1,499 @@
+---
+title: 'Creating a Host Account'
+description: 'Step-by-step guide to registering and setting up your host account on AndanDo'
+icon: 'user-plus'
+---
+
+## Getting Started
+
+Creating your host account on AndanDo is quick and straightforward. This guide walks you through the registration process and initial account setup.
+
+<Note>
+  All hosts start with the same registration process. Once your account is created, you'll have access to the host dashboard where you can create and manage your tours.
+</Note>
+
+## Registration Process
+
+### Step 1: Access the Registration Page
+
+Navigate to the registration page at `/authentication/register`. You'll see a clean, centered form ready for your information.
+
+<Tip>
+  If you already have an account, click the "Inicia sesion" (Sign in) link at the top of the registration form to go directly to the login page.
+</Tip>
+
+### Step 2: Complete the Registration Form
+
+The registration form collects essential information to create your host profile:
+
+<Steps>
+  <Step title="Basic Information">
+    **Required Fields:**
+    - **Nombre** (First Name): Your given name
+    - **Email**: Your email address (must be unique and valid)
+    - **Confirmar Email**: Re-enter your email to confirm
+    - **Contrasena** (Password): At least 6 characters
+    - **Confirmar contrasena**: Re-enter your password to confirm
+
+    ```csharp Components/Pages/Register_Account.razor
+    [Required(ErrorMessage = "Ingresa tu nombre.")]
+    public string Nombre { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "Ingresa tu email.")]
+    [EmailAddress(ErrorMessage = "Email invalido.")]
+    public string Email { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "Ingresa tu contrasena.")]
+    [MinLength(6, ErrorMessage = "La contrasena debe tener al menos 6 caracteres.")]
+    public string Password { get; set; } = string.Empty;
+    ```
+  </Step>
+
+  <Step title="Optional Details">
+    **Optional but Recommended:**
+    - **Apellido** (Last Name): Your family name
+    - **Pais** (Country): Select from a dropdown of 195+ countries
+    - **Ciudad** (City): Your city or location
+    - **Telefono** (Phone): Your contact number
+    - **URL Imagen Perfil** (Profile Photo URL): Link to your profile picture
+
+    <Info>
+      Providing complete information helps build trust with potential customers and improves your profile's professionalism.
+    </Info>
+  </Step>
+
+  <Step title="Submit Registration">
+    Click the **"Registrar"** button to submit your registration. A loading modal will appear while your account is being created.
+
+    ```csharp Components/Pages/Register_Account.razor
+    @if (_isSubmitting)
+    {
+        <div class="registration-modal-backdrop">
+            <div class="registration-modal">
+                <div class="spinner"></div>
+                <div class="text-16 fw-600 mt-15">Registrando tu cuenta...</div>
+                <div class="text-13 text-dark-1 mt-5">Esto puede tardar unos segundos.</div>
+            </div>
+        </div>
+    }
+    ```
+  </Step>
+</Steps>
+
+### Form Validation
+
+The registration form includes comprehensive validation to ensure data quality:
+
+<AccordionGroup>
+  <Accordion title="Email Validation" icon="envelope">
+    - Must be a valid email format
+    - Must match the confirmation email
+    - Must be unique (not already registered)
+    
+    ```csharp
+    [EmailAddress(ErrorMessage = "Email invalido.")]
+    [Compare(nameof(Email), ErrorMessage = "Los correos no coinciden.")]
+    public string ConfirmEmail { get; set; } = string.Empty;
+    ```
+  </Accordion>
+
+  <Accordion title="Password Requirements" icon="lock">
+    - Minimum 6 characters
+    - Must match the confirmation password
+    - Hashed using PBKDF2 with SHA256
+    
+    ```csharp
+    [MinLength(6, ErrorMessage = "La contrasena debe tener al menos 6 caracteres.")]
+    [Compare(nameof(Password), ErrorMessage = "Las contrasenas no coinciden.")]
+    public string ConfirmPassword { get; set; } = string.Empty;
+    ```
+  </Accordion>
+
+  <Accordion title="Phone & URL Validation" icon="phone">
+    - Phone: Must be valid phone format (optional)
+    - Profile Photo URL: Must be valid URL format (optional)
+    
+    ```csharp
+    [Phone(ErrorMessage = "Telefono invalido.")]
+    public string? Telefono { get; set; }
+
+    [Url(ErrorMessage = "Url invalida.")]
+    public string? FotoPerfilUrl { get; set; }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Backend Registration Process
+
+When you submit the registration form, the system performs several operations:
+
+### 1. Data Processing
+
+```csharp Components/Pages/Register_Account.razor
+var request = new RegisterRequest(
+    email,
+    _model.Password,
+    _model.Nombre.Trim(),
+    string.IsNullOrWhiteSpace(_model.Apellido) ? null : _model.Apellido.Trim(),
+    string.IsNullOrWhiteSpace(_model.Telefono) ? null : _model.Telefono.Trim(),
+    string.IsNullOrWhiteSpace(_model.Pais) ? null : _model.Pais.Trim(),
+    string.IsNullOrWhiteSpace(_model.Ciudad) ? null : _model.Ciudad.Trim(),
+    string.IsNullOrWhiteSpace(_model.FotoPerfilUrl) ? null : _model.FotoPerfilUrl.Trim()
+);
+```
+
+<Note>
+  All string inputs are trimmed to remove leading/trailing whitespace, and optional fields are converted to null if empty.
+</Note>
+
+### 2. Password Hashing
+
+Your password is securely hashed before storage:
+
+```csharp Services/Auth/AuthService.cs
+public string HashPassword(string password)
+{
+    var salt = RandomNumberGenerator.GetBytes(Pbkdf2SaltSize); // 16 bytes
+    var hash = Rfc2898DeriveBytes.Pbkdf2(
+        password,
+        salt,
+        Pbkdf2Iterations, // 100,000 iterations
+        HashAlgorithmName.SHA256,
+        Pbkdf2KeySize); // 32 bytes
+
+    return $"{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
+}
+```
+
+<Warning>
+  **Security First**: Your password is never stored in plain text. The system uses 100,000 iterations of PBKDF2 with SHA256, making it extremely resistant to brute-force attacks.
+</Warning>
+
+### 3. Database Registration
+
+The system calls a stored procedure to create your account:
+
+```csharp Services/Auth/AuthService.cs
+await using var command = new SqlCommand("sp_Usuarios_Registrar", connection)
+{
+    CommandType = CommandType.StoredProcedure
+};
+
+command.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 150) { Value = request.Email });
+command.Parameters.Add(new SqlParameter("@ContrasenaHash", SqlDbType.NVarChar, 300) { Value = passwordHash });
+command.Parameters.Add(new SqlParameter("@Nombre", SqlDbType.NVarChar, 100) { Value = request.Nombre });
+// ... additional parameters
+```
+
+<Steps>
+  <Step title="Email Check">
+    The system verifies that your email isn't already registered
+    - Result code 1: Email already exists
+  </Step>
+  <Step title="User Creation">
+    A new user record is created with all provided information
+    - Returns your new UsuarioId (User ID)
+  </Step>
+  <Step title="Role Assignment">
+    You're automatically assigned the base user role (RolId = 1)
+    ```csharp
+    await EnsureRoleAssignmentAsync(connection, userId, 1, cancellationToken);
+    ```
+  </Step>
+  <Step title="Profile Photo">
+    If you provided a profile photo URL, it's saved to your account
+    ```csharp
+    await using var updatePhotoCommand = new SqlCommand(updatePhotoSql, connection);
+    updatePhotoCommand.Parameters.Add(new SqlParameter("@FotoPerfilUrl", SqlDbType.NVarChar, 300)
+    {
+        Value = request.FotoPerfilUrl
+    });
+    ```
+  </Step>
+</Steps>
+
+## Registration Success
+
+Upon successful registration:
+
+<CardGroup cols={2}>
+  <Card title="Success Message" icon="circle-check">
+    You'll see a green success alert:
+    "Cuenta creada correctamente. Ahora puedes iniciar sesion."
+  </Card>
+  <Card title="Auto-Fill Email" icon="envelope">
+    Your email is automatically populated in the form for easy re-entry
+  </Card>
+</CardGroup>
+
+```csharp Components/Pages/Register_Account.razor
+_successMessage = "Cuenta creada correctamente. Ahora puedes iniciar sesion.";
+_model = new RegisterFormModel
+{
+    Email = email,
+    ConfirmEmail = email
+};
+```
+
+<Tip>
+  After seeing the success message, click the "Inicia sesion" link to go to the login page and access your new account.
+</Tip>
+
+## Common Registration Errors
+
+<AccordionGroup>
+  <Accordion title="Email Already Registered" icon="circle-exclamation">
+    **Error**: "El email ya esta registrado."
+    
+    **Solution**: This email is already in use. Try:
+    - Using a different email address
+    - Recovering your password if you forgot it
+    - Contacting support if you believe this is an error
+  </Accordion>
+
+  <Accordion title="Validation Errors" icon="triangle-exclamation">
+    **Common Issues**:
+    - Emails don't match
+    - Passwords don't match
+    - Password too short (< 6 characters)
+    - Invalid email format
+    - Invalid phone number format
+    - Invalid URL format for profile photo
+    
+    **Solution**: Review the highlighted fields and correct the validation errors before submitting.
+  </Accordion>
+
+  <Accordion title="Connection Timeout" icon="clock">
+    **Error**: Registration takes too long or times out
+    
+    **Solution**:
+    - Check your internet connection
+    - Refresh the page and try again
+    - Clear your browser cache
+    - Contact support if the issue persists
+  </Accordion>
+</AccordionGroup>
+
+## After Registration: Logging In
+
+Once your account is created, you can sign in:
+
+### Login Process
+
+<Steps>
+  <Step title="Navigate to Login">
+    Go to `/authentication` or click "Inicia sesion" from the registration page
+  </Step>
+
+  <Step title="Enter Credentials">
+    Provide your email and password:
+    ```csharp Components/Pages/Login_Account.razor
+    var result = await AuthService.SignInAsync(new LoginRequest(
+        _model.Email.Trim(),
+        _model.Password));
+    ```
+  </Step>
+
+  <Step title="Remember Email (Optional)">
+    Check "Recordar correo" to save your email for future logins:
+    ```csharp
+    if (_model.RememberEmail)
+    {
+        await Storage.SetAsync(RememberEmailKey, _model.Email.Trim());
+    }
+    ```
+  </Step>
+
+  <Step title="Session Creation">
+    Upon successful login:
+    - A JWT token is generated for your session
+    - Your profile data is stored in protected local storage
+    - Your last login timestamp is updated
+    ```csharp
+    Session.SetUser(result);
+    await Storage.SetAsync("auth_session", result);
+    ```
+  </Step>
+</Steps>
+
+### Login Validation
+
+The system performs several security checks during login:
+
+```csharp Services/Auth/AuthService.cs
+// 1. Verify user exists
+if (!await reader.ReadAsync(cancellationToken))
+{
+    throw new UnauthorizedAccessException("Credenciales incorrectas.");
+}
+
+// 2. Check account status
+if (!estaActivo)
+{
+    throw new UnauthorizedAccessException("Usuario inactivo.");
+}
+
+if (estaBloqueado)
+{
+    throw new UnauthorizedAccessException("Usuario bloqueado.");
+}
+
+// 3. Verify password
+if (!VerifyPassword(request.Password, passwordHash))
+{
+    throw new UnauthorizedAccessException("Credenciales incorrectas.");
+}
+```
+
+<Warning>
+  For security reasons, the system doesn't reveal whether the email or password is incorrect—it simply states "Credenciales incorrectas" (Incorrect credentials).
+</Warning>
+
+## Initial Account Setup
+
+After your first login, consider completing these setup tasks:
+
+<CardGroup cols={2}>
+  <Card title="Complete Your Profile" icon="id-card" href="/hosts/creating-account">
+    Add missing information like phone number, location, and profile photo
+  </Card>
+  <Card title="Configure Payment Methods" icon="credit-card" href="/configuration/paypal">
+    Set up how you want to receive payments from customers
+  </Card>
+  <Card title="Create Your First Tour" icon="map-marked-alt" href="/hosts/creating-tours">
+    Start building your tour offerings
+  </Card>
+  <Card title="Explore the Dashboard" icon="chart-line" href="/hosts/dashboard">
+    Familiarize yourself with the host dashboard features
+  </Card>
+</CardGroup>
+
+## Profile Photo Setup
+
+Your profile photo helps customers recognize and trust you:
+
+### Adding a Profile Photo
+
+1. **Host your image online** or use an existing URL
+2. **Copy the full URL** (must start with `http://` or `https://`)
+3. **Paste in the registration form** or update it later in your profile
+
+<Info>
+  **Accepted Formats**: The system validates that your URL is properly formatted. Most image hosting services (Imgur, Cloudinary, etc.) work perfectly.
+</Info>
+
+### Profile Photo Display
+
+```csharp Components/Pages/Dashboard/MyProfile.razor
+<div class="avatar-preview">
+    @if (!string.IsNullOrWhiteSpace(PhotoPreviewUrl))
+    {
+        <img src="@PhotoPreviewUrl" alt="Foto de perfil" loading="lazy" />
+    }
+    else
+    {
+        <span>@GetInitials()</span>
+    }
+</div>
+```
+
+<Tip>
+  If you don't provide a photo, the system automatically displays your initials in an attractive gradient circle.
+</Tip>
+
+## Country Selection
+
+The registration form includes a comprehensive list of 195+ countries:
+
+```csharp Components/Pages/Register_Account.razor
+private readonly List<string> _countries =
+[
+    "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina",
+    "Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh",
+    // ... 195+ countries total
+    "United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela",
+    "Vietnam","Yemen","Zambia","Zimbabwe"
+];
+```
+
+<Note>
+  Your country selection helps customers find local hosts and can be used for regional features in future updates.
+</Note>
+
+## Account Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Strong Passwords" icon="key">
+    - Use at least 8 characters (minimum is 6)
+    - Mix uppercase, lowercase, numbers, and symbols
+    - Avoid common words or personal information
+  </Card>
+  <Card title="Unique Credentials" icon="user-shield">
+    - Don't reuse passwords from other sites
+    - Use a password manager if needed
+    - Change your password periodically
+  </Card>
+  <Card title="Secure Email" icon="envelope-circle-check">
+    - Use an email account with 2FA enabled
+    - Keep your email password secure
+    - Monitor for suspicious login attempts
+  </Card>
+  <Card title="Regular Updates" icon="arrows-rotate">
+    - Keep your contact information current
+    - Update your profile photo periodically
+    - Review your account status regularly
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Registration Form Not Submitting" icon="bug">
+    **Possible Causes**:
+    - JavaScript errors in browser console
+    - Browser extensions blocking requests
+    - Network connectivity issues
+    
+    **Solutions**:
+    - Check browser console for errors (F12)
+    - Disable browser extensions temporarily
+    - Try a different browser
+    - Clear cache and cookies
+  </Accordion>
+
+  <Accordion title="Email Not Receiving Confirmation" icon="envelope">
+    **Note**: The current version doesn't send email confirmations automatically.
+    
+    Registration is immediate—you can log in right away after seeing the success message.
+  </Accordion>
+
+  <Accordion title="Can't Access Dashboard After Registration" icon="door-closed">
+    **Steps to Resolve**:
+    1. Ensure you've logged in (not just registered)
+    2. Check that you're navigating to `/dashboard/main`
+    3. Clear your browser cache
+    4. Try logging out and back in
+    5. Contact support if issue persists
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Steps>
+  <Step title="Log In to Your Account">
+    Use your email and password to access your host dashboard
+  </Step>
+  <Step title="Complete Your Profile">
+    Add any missing information to build trust with customers
+  </Step>
+  <Step title="Explore the Dashboard">
+    Familiarize yourself with the host tools and features
+  </Step>
+  <Step title="Create Your First Tour">
+    Start building your tour offerings to attract customers
+  </Step>
+</Steps>
+
+<Card title="Ready to Get Started?" icon="rocket">
+  Now that you understand the registration process, head to `/authentication/register` to create your account and begin your journey as an AndanDo host!
+</Card>

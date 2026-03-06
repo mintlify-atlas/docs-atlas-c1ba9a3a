@@ -1,0 +1,460 @@
+---
+title: 'Revenue Tracking & Analytics'
+description: 'Track sales performance and analyze revenue trends for your tours'
+icon: 'chart-line'
+---
+
+## Overview
+
+AndanDo provides comprehensive revenue tracking and analytics to help hosts understand their business performance, identify trends, and optimize their tours.
+
+## Statistics Service Methods
+
+The platform provides several methods for retrieving analytics data:
+
+### Get Tour Reservation Stats
+
+Retrieve detailed statistics for a specific tour:
+
+```csharp Services/Tour/TourService.cs:1897
+public async Task<TourReservationStatsDto> GetTourReservationStatsAsync(
+    int tourId,
+    int recentDays = 30,
+    CancellationToken cancellationToken = default)
+{
+    var sql = $@"
+    SELECT 
+        CAST(r.CreatedAt AS date) AS DayDate,
+        COUNT(*) AS ReservationCount,
+        COALESCE(SUM(r.AmountPaid), 0) AS TotalAmount,
+        SUM(CASE WHEN r.PaymentStatus = 1 THEN 1 ELSE 0 END) AS PaidCount,
+        SUM(CASE WHEN r.PaymentStatus <> 1 THEN 1 ELSE 0 END) AS PendingCount,
+        COALESCE(SUM(r.AmountPaid), 0) AS PaidAmount,
+        COALESCE(SUM(r.TotalAmount - ISNULL(r.AmountPaid, 0)), 0) AS PendingAmount
+    FROM {reservationTable} r
+    WHERE r.TourId = @TourId
+      AND r.CreatedAt >= DATEADD(day, -@RecentDays, SYSUTCDATETIME())
+    GROUP BY CAST(r.CreatedAt AS date)
+    ORDER BY DayDate ASC;";
+    
+    // Returns daily breakdown and totals
+}
+```
+
+### Get Owner Earnings
+
+Calculate total earnings for a host:
+
+```csharp Services/Tour/TourService.cs:1764
+public async Task<decimal> GetOwnerEarningsAsync(
+    int ownerUserId,
+    CancellationToken cancellationToken = default)
+{
+    var sql = $@"
+    SELECT COALESCE(SUM(r.AmountPaid), 0)
+    FROM {reservationTable} r
+    INNER JOIN {tourTable} t ON t.TourId = r.TourId
+    WHERE t.OwnerUserId = @OwnerUserId";
+    
+    var result = await ExecuteScalarAsync<decimal>(sql, new { OwnerUserId = ownerUserId });
+    return result;
+}
+```
+
+### Get Owner Tour Stats
+
+Retrieve tour count statistics:
+
+```csharp Services/Tour/TourService.cs:1716
+public async Task<(int TotalServices, int RecentServices)> GetOwnerTourStatsAsync(
+    int ownerUserId,
+    int recentDays = 7,
+    CancellationToken cancellationToken = default)
+{
+    var totalSql = $@"
+    SELECT COUNT(*)
+    FROM {tourTable}
+    WHERE OwnerUserId = @OwnerUserId
+      AND IsActive = 1";
+    
+    var recentSql = $@"
+    SELECT COUNT(*)
+    FROM {tourTable}
+    WHERE OwnerUserId = @OwnerUserId
+      AND IsActive = 1
+      AND CreatedAt >= DATEADD(day, -@RecentDays, SYSUTCDATETIME())";
+    
+    // Returns (total, recent)
+}
+```
+
+## Statistics Data Transfer Objects
+
+### TourReservationStatsDto
+
+Main statistics container:
+
+```csharp Dtos/TourDtos.cs:91
+public sealed record TourReservationStatsDto(
+    int TourId,
+    int TotalReservations,
+    decimal TotalAmount,
+    IReadOnlyList<TourReservationDayStat> Daily);
+```
+
+### TourReservationDayStat
+
+Daily breakdown of reservations and revenue:
+
+```csharp Dtos/TourDtos.cs:82
+public sealed record TourReservationDayStat(
+    DateTime Date,
+    int Count,
+    decimal Amount,
+    int PaidCount,
+    int PendingCount,
+    decimal PaidAmount,
+    decimal PendingAmount);
+```
+
+<Info>
+The `DayStat` record includes separate tracking for paid and pending payments.
+</Info>
+
+## Dashboard Statistics Display
+
+The dashboard shows three key metrics for selected tours:
+
+<Steps>
+  <Step title="Total Tickets">
+    Displays the sum of all tickets sold for the event
+  </Step>
+  
+  <Step title="Total Reservations">
+    Shows the count of all reservation records
+  </Step>
+  
+  <Step title="Total Sales">
+    Presents the accumulated revenue in the tour's currency
+  </Step>
+</Steps>
+
+### Metric Cards Implementation
+
+```razor Components/Pages/Dashboard/Index.razor:71
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+    <!-- Tickets Card -->
+    <div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);">
+        <div style="font-size:32px;font-weight:800;">@_reportTotalTickets</div>
+        <div>Tickets registrados para el evento</div>
+    </div>
+    
+    <!-- Reservations Card -->
+    <div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);">
+        <div style="font-size:32px;font-weight:800;">@_reportReservationCount</div>
+        <div>Incluye todas las reservas asociadas</div>
+    </div>
+    
+    <!-- Sales Card -->
+    <div style="background:linear-gradient(135deg,#fff8f5,#ffedd5);">
+        <div style="font-size:24px;font-weight:800;">
+            @FormatCurrency(_reportTotalAmount, _reportCurrency)
+        </div>
+        <div>Monto acumulado del evento</div>
+    </div>
+</div>
+```
+
+## Sales Modal Analytics
+
+The bookings page includes a detailed sales modal for each tour:
+
+### Opening the Modal
+
+```csharp Components/Pages/Dashboard/MyBookings.razor:992
+private async Task OpenStatsModalAsync(TourBookingViewModel model)
+{
+    _selectedService = model;
+    _statsError = null;
+    _salesStats = null;
+    _showStatsModal = true;
+    _loadingStats = true;
+
+    await LoadSalesStatsAsync(model.Tour.TourId);
+}
+```
+
+### Loading Statistics
+
+```csharp Components/Pages/Dashboard/MyBookings.razor:1003
+private async Task LoadSalesStatsAsync(int tourId)
+{
+    try
+    {
+        _salesStats = await TourService.GetTourReservationStatsAsync(
+            tourId, 
+            _salesWindowDays
+        );
+        _reservationDetails = await TourService.GetReservationsByTourAsync(tourId);
+    }
+    catch (Exception ex)
+    {
+        _statsError = "No se pudieron cargar las ventas.";
+        Console.WriteLine(ex);
+    }
+    finally
+    {
+        _loadingStats = false;
+        await InvokeAsync(StateHasChanged);
+        
+        if (_salesStats is not null && _salesStats.Daily.Any())
+        {
+            await RenderChartAsync();
+        }
+    }
+}
+```
+
+## Sales Chart Visualization
+
+The sales modal includes a Chart.js chart showing daily trends:
+
+### Chart Rendering
+
+```csharp Components/Pages/Dashboard/MyBookings.razor:1027
+private async Task RenderChartAsync()
+{
+    try 
+    {
+        var ordered = SortedSalesDaily.ToList();
+        var labels = ordered.Select(d => d.Date.ToString("dd/MM")).ToArray();
+        var paidCounts = ordered.Select(d => d.PaidCount).ToArray();
+        var pendingCounts = ordered.Select(d => d.PendingCount).ToArray();
+        var paidAmounts = ordered.Select(d => d.PaidAmount).ToArray();
+        var pendingAmounts = ordered.Select(d => d.PendingAmount).ToArray();
+
+        await JS.InvokeVoidAsync("chartHelper.renderSalesChart", 
+            "salesChart", 
+            labels, 
+            paidCounts,
+            pendingCounts,
+            paidAmounts, 
+            pendingAmounts,
+            "Reservas Pagadas", 
+            "Reservas Pendientes",
+            "Dinero Pagado",
+            "Dinero Pendiente");
+    }
+    catch(Exception ex)
+    {
+         Console.WriteLine($"Error rendering chart: {ex.Message}");
+    }
+}
+```
+
+### Chart Data Structure
+
+The chart displays four data series:
+
+<CardGroup cols={2}>
+  <Card title="Paid Reservations" icon="circle-check">
+    Count of reservations with PaymentStatus = 1
+  </Card>
+  <Card title="Pending Reservations" icon="circle-pause">
+    Count of reservations with PaymentStatus ≠ 1
+  </Card>
+  <Card title="Paid Amount" icon="dollar-sign">
+    Sum of AmountPaid for all reservations
+  </Card>
+  <Card title="Pending Amount" icon="clock">
+    Sum of (TotalAmount - AmountPaid)
+  </Card>
+</CardGroup>
+
+## Recent Reservations Table
+
+The modal includes a table of recent bookings:
+
+```razor Components/Pages/Dashboard/MyBookings.razor:357
+<div style="overflow-x:auto;max-height:220px;overflow-y:auto;">
+    @if (_reservationDetails is null || !_reservationDetails.Any())
+    {
+        <p>No hay detalles disponibles.</p>
+    }
+    else
+    {
+        <table class="bk-table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Cant.</th>
+                    <th>Total</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _reservationDetails.OrderByDescending(r => r.TravelDate))
+                {
+                    <tr>
+                        <td>@r.TravelDate.ToString("dd MMM HH:mm")</td>
+                        <td>@r.ContactName</td>
+                        <td>@r.Tickets.Sum(t => t.Quantity)</td>
+                        <td>@FormatCurrency(r.TotalAmount, r.CurrencyCode)</td>
+                        <td>
+                            <span class="bk-badge @(r.PaymentStatus == 1 ? "bk-badge--success" : "bk-badge--warning")">
+                                @GetPaymentLabel(r.PaymentStatus)
+                            </span>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+```
+
+## Date Range Support
+
+Statistics can be filtered by date range:
+
+### Get Tour Date Range
+
+```csharp Services/Tour/TourService.cs:1800
+public async Task<(DateTime? StartDate, DateTime? EndDate)> GetTourDateRangeAsync(
+    int tourId,
+    CancellationToken cancellationToken = default)
+{
+    const string sql = @"
+    SELECT 
+        MIN(FechaInicio) AS StartDate,
+        MAX(FechaFin) AS EndDate
+    FROM TourFechas
+    WHERE EventoId = @TourId";
+    
+    // Returns date range from TourFechas table
+}
+```
+
+<Note>
+The default analysis window is 30 days, but this can be customized in the `GetTourReservationStatsAsync` call.
+</Note>
+
+## Performance Metrics
+
+Key performance indicators tracked:
+
+### Per-Tour Metrics
+
+| Metric | Source | Calculation |
+|--------|--------|-------------|
+| Total Reservations | `TourReservation.TourReservationId` | COUNT(*) |
+| Total Revenue | `TourReservation.AmountPaid` | SUM(AmountPaid) |
+| Average Order Value | Calculated | TotalRevenue / TotalReservations |
+| Conversion Rate | Multiple tables | (Reservations / Views) * 100 |
+
+### Multi-Tour Metrics
+
+| Metric | Description |
+|--------|-------------|
+| Total Services | Count of active tours owned by user |
+| Recent Services | Tours created in last N days |
+| Portfolio Revenue | Sum of AmountPaid across all tours |
+| Active Bookings | Count of future reservations |
+
+## Payment Status Breakdown
+
+Statistics distinguish between payment states:
+
+```csharp
+var paidCount = reservations.Count(r => r.PaymentStatus == 1);
+var pendingCount = reservations.Count(r => r.PaymentStatus == 0);
+var partialCount = reservations.Count(r => r.PaymentStatus == 2);
+var cancelledCount = reservations.Count(r => r.PaymentStatus == 4);
+```
+
+### Status Codes
+
+| Code | Label | Description |
+|------|-------|-------------|
+| 0 | Pendiente | No payment received |
+| 1 | Pagado | Fully paid |
+| 2 | Pago Parcial | Partial payment received |
+| 3 | Reembolsado | Refunded |
+| 4 | Cancelado | Cancelled |
+
+## Currency Handling
+
+Statistics respect currency settings per tour:
+
+```csharp
+private static string FormatCurrency(decimal amount, string currencyCode)
+{
+    var symbol = currencyCode switch
+    {
+        "USD" => "$",
+        "EUR" => "EUR",
+        _ => "RD$"
+    };
+
+    return $"{symbol}{amount:N0}";
+}
+```
+
+<Warning>
+Mixing multiple currencies in aggregated statistics may produce incorrect totals. Each tour's statistics use its configured currency.
+</Warning>
+
+## Real-Time Updates
+
+Statistics are loaded dynamically:
+
+<Steps>
+  <Step title="On Page Load">
+    Statistics are fetched when the dashboard or bookings page loads
+  </Step>
+  
+  <Step title="On Tour Selection">
+    Dashboard reloads stats when a different tour is selected
+  </Step>
+  
+  <Step title="Manual Refresh">
+    Use the "Actualizar" button to reload latest data
+  </Step>
+</Steps>
+
+## Error Handling
+
+Statistics methods handle errors gracefully:
+
+```csharp
+try
+{
+    _salesStats = await TourService.GetTourReservationStatsAsync(tourId, 30);
+}
+catch (Exception ex)
+{
+    Console.WriteLine(ex);
+    _statsError = "No se pudieron cargar las ventas.";
+    return new TourReservationStatsDto(
+        TourId: tourId,
+        TotalReservations: 0,
+        TotalAmount: 0,
+        Daily: Array.Empty<TourReservationDayStat>()
+    );
+}
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Dashboard Overview" icon="gauge" href="/hosts/dashboard">
+    View real-time metrics on your dashboard
+  </Card>
+  <Card title="Managing Bookings" icon="calendar-check" href="/hosts/managing-bookings">
+    Access the bookings page for detailed analytics
+  </Card>
+  <Card title="Database Schema" icon="database" href="/configuration/database">
+    Understand the underlying data structure
+  </Card>
+</CardGroup>

@@ -1,0 +1,646 @@
+---
+title: Booking System
+description: Multi-step reservation system with ticket selection, customer information collection, payment processing, and confirmation
+icon: ticket
+---
+
+## Overview
+
+AndanDo's booking system provides a seamless, step-by-step checkout experience for tour reservations. Built with Blazor Server's real-time capabilities, the system handles ticket selection, extras, payment plans, and integrates with PayPal for secure transactions.
+
+<CardGroup cols={2}>
+  <Card title="Multi-Step Checkout" icon="stairs">
+    4-step guided process: Tickets → Details → Payment → Confirmation
+  </Card>
+  <Card title="Dynamic Pricing" icon="dollar-sign">
+    Real-time price calculation with multiple currencies
+  </Card>
+  <Card title="Ticket Management" icon="ticket">
+    Multiple ticket types with age ranges and capacity limits
+  </Card>
+  <Card title="Reservation Timer" icon="clock">
+    15-minute countdown to complete booking
+  </Card>
+</CardGroup>
+
+## Booking Architecture
+
+### Reservation Creation
+
+```csharp TourService.cs
+public async Task<int> CreateReservationAsync(
+    TourReservationRequest request,
+    IEnumerable<TourReservationTicketRequest> tickets,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection = CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+    await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+    // 1. Insert main reservation record
+    var reservationId = await InsertReservationAsync(connection, transaction, request);
+
+    // 2. Insert ticket line items
+    foreach (var ticket in tickets)
+    {
+        await InsertReservationTicketAsync(connection, transaction, reservationId, ticket);
+    }
+
+    // 3. Commit transaction
+    await transaction.CommitAsync(cancellationToken);
+    return reservationId;
+}
+```
+
+### Data Models
+
+<CodeGroup>
+```csharp TourReservationRequest
+public record TourReservationRequest(
+    int TourId,
+    int UserId,
+    string CustomerName,
+    string CustomerEmail,
+    string? CustomerPhone,
+    string? SpecialRequests,
+    decimal TotalAmount,
+    string CurrencyCode,
+    byte PaymentStatus,
+    string? PaymentProvider,
+    string? PaymentReference
+);
+```
+
+```csharp TourReservationTicketRequest
+public record TourReservationTicketRequest(
+    int TourTicketTypeId,
+    int Quantity,
+    decimal UnitPrice,
+    decimal Subtotal
+);
+```
+</CodeGroup>
+
+## Step 1: Ticket Selection
+
+Users select ticket types and quantities with real-time validation:
+
+```razor TourDetails.razor - Ticket Selection
+<div class="rmodal__section">
+    <h3 class="rmodal__section-title">Selecciona tus tickets</h3>
+    
+    @foreach (var ticket in AvailableTickets)
+    {
+        <div class="ticket-row">
+            <div class="ticket-info">
+                <div class="ticket-name">@ticket.Name</div>
+                <div class="ticket-price">@FormatPrice(ticket.Price)</div>
+                @if (ticket.MinAge.HasValue || ticket.MaxAge.HasValue)
+                {
+                    <div class="ticket-age-range">
+                        @GetAgeRangeLabel(ticket.MinAge, ticket.MaxAge)
+                    </div>
+                }
+            </div>
+            
+            <div class="ticket-quantity">
+                <button type="button" 
+                        @onclick="() => DecrementTicket(ticket.TourTicketTypeId)"
+                        disabled="@(!CanDecrement(ticket.TourTicketTypeId))">
+                    <i class="icon-minus"></i>
+                </button>
+                <span class="quantity-display">@GetQuantity(ticket.TourTicketTypeId)</span>
+                <button type="button" 
+                        @onclick="() => IncrementTicket(ticket.TourTicketTypeId)"
+                        disabled="@(!CanIncrement(ticket))">
+                    <i class="icon-plus"></i>
+                </button>
+            </div>
+        </div>
+        
+        @if (IsSoldOut(ticket))
+        {
+            <div class="ticket-badge -soldout">Agotado</div>
+        }
+        else if (IsUpcoming(ticket))
+        {
+            <div class="ticket-badge -upcoming">Próximamente</div>
+        }
+    }
+</div>
+```
+
+### Ticket Validation
+
+```csharp Ticket Quantity Validation
+private bool CanIncrement(TourTicketTypeDetailDto ticket)
+{
+    var currentQty = GetQuantity(ticket.TourTicketTypeId);
+    
+    // Check max per order
+    if (ticket.MaxPorOrden.HasValue && currentQty >= ticket.MaxPorOrden.Value)
+    {
+        return false;
+    }
+    
+    // Check capacity
+    if (ticket.CapacidadPorTipo.HasValue)
+    {
+        var reserved = GetReservedCount(ticket.TourTicketTypeId);
+        var available = ticket.CapacidadPorTipo.Value - reserved;
+        if (currentQty >= available)
+        {
+            return false;
+        }
+    }
+    
+    // Check sale window
+    var now = DateTime.UtcNow;
+    if (ticket.VentaInicioUtc.HasValue && now < ticket.VentaInicioUtc.Value)
+    {
+        return false;
+    }
+    if (ticket.VentaFinUtc.HasValue && now > ticket.VentaFinUtc.Value)
+    {
+        return false;
+    }
+    
+    return true;
+}
+```
+
+<Note>
+Ticket types can have:
+- **Age restrictions**: MinAge and MaxAge
+- **Capacity limits**: CapacidadPorTipo (per ticket type)
+- **Order limits**: MaxPorOrden (max tickets per booking)
+- **User limits**: MaxPorUsuario (lifetime limit per user)
+- **Sale windows**: VentaInicioUtc and VentaFinUtc
+</Note>
+
+## Step 2: Customer Information
+
+Collect customer details with validation:
+
+```razor Customer Information Form
+<div class="rfield">
+    <label class="rfield__label">Nombre completo</label>
+    <div class="rfield__input-wrap">
+        <span class="rfield__icon"><i class="icon-user"></i></span>
+        <input type="text" 
+               class="rfield__input" 
+               @bind="_customerName"
+               placeholder="Juan Pérez" />
+    </div>
+</div>
+
+<div class="rfield">
+    <label class="rfield__label">Correo electrónico</label>
+    <div class="rfield__input-wrap">
+        <span class="rfield__icon"><i class="icon-mail"></i></span>
+        <input type="email" 
+               class="rfield__input" 
+               @bind="_customerEmail"
+               placeholder="ejemplo@correo.com" />
+    </div>
+</div>
+
+<div class="rfield">
+    <label class="rfield__label">
+        Teléfono <span class="rfield__optional">(opcional)</span>
+    </label>
+    <div class="rfield__input-wrap">
+        <span class="rfield__icon"><i class="icon-phone"></i></span>
+        <input type="tel" 
+               class="rfield__input" 
+               @bind="_customerPhone"
+               placeholder="+1 (809) 555-0123" />
+    </div>
+</div>
+
+<div class="rfield">
+    <label class="rfield__label">
+        Solicitudes especiales <span class="rfield__optional">(opcional)</span>
+    </label>
+    <textarea class="rfield__textarea" 
+              @bind="_specialRequests"
+              rows="4"
+              placeholder="Alergias, restricciones dietéticas, necesidades de accesibilidad..."></textarea>
+</div>
+```
+
+### Auto-fill for Logged Users
+
+```csharp Auto-populate Customer Data
+protected override async Task OnInitializedAsync()
+{
+    await EnsureSessionLoadedAsync();
+    
+    if (Session.IsAuthenticated && Session.Current is not null)
+    {
+        _customerName = $"{Session.Current.Nombre} {Session.Current.Apellido}".Trim();
+        _customerEmail = Session.Current.Email;
+        _customerPhone = Session.Current.Telefono;
+    }
+}
+```
+
+## Step 3: Payment Plan Selection
+
+Tours can offer multiple payment options:
+
+```razor Payment Plan Cards
+<div class="rmodal__payment-grid">
+    @if (!_tour.IsNoPayment)
+    {
+        <button type="button" 
+                class="rmodal__pay-card @(_selectedPaymentPlan == "full" ? "-active" : "")"
+                @onclick='() => _selectedPaymentPlan = "full"'>
+            <div class="rmodal__pay-card__icon">
+                <i class="icon-check"></i>
+            </div>
+            <div>
+                <div class="rmodal__pay-card__title">Pago completo</div>
+                <div class="rmodal__pay-card__hint">Paga el 100% ahora</div>
+            </div>
+            @if (_selectedPaymentPlan == "full")
+            {
+                <div class="rmodal__pay-card__check">
+                    <i class="icon-check"></i>
+                </div>
+            }
+        </button>
+    }
+    
+    @if (_tour.IsQuote && _tour.QuoteDepositPercent.HasValue)
+    {
+        <button type="button" 
+                class="rmodal__pay-card @(_selectedPaymentPlan == "deposit" ? "-active" : "")"
+                @onclick='() => _selectedPaymentPlan = "deposit"'>
+            <div class="rmodal__pay-card__icon">
+                <i class="icon-calendar"></i>
+            </div>
+            <div>
+                <div class="rmodal__pay-card__title">Depósito</div>
+                <div class="rmodal__pay-card__hint">
+                    Paga @(_tour.QuoteDepositPercent.Value)% ahora
+                </div>
+            </div>
+        </button>
+    }
+    
+    @if (_tour.IsNoPayment)
+    {
+        <button type="button" 
+                class="rmodal__pay-card @(_selectedPaymentPlan == "none" ? "-active" : "")"
+                @onclick='() => _selectedPaymentPlan = "none"'>
+            <div class="rmodal__pay-card__icon">
+                <i class="icon-info"></i>
+            </div>
+            <div>
+                <div class="rmodal__pay-card__title">Sin pago en línea</div>
+                <div class="rmodal__pay-card__hint">Reserva sin pago</div>
+            </div>
+        </button>
+    }
+</div>
+```
+
+### Payment Calculation
+
+```csharp Calculate Payment Amounts
+private decimal CalculatePayNowAmount()
+{
+    var total = CalculateTotalAmount();
+    
+    return _selectedPaymentPlan switch
+    {
+        "full" => total,
+        "deposit" when _tour.QuoteDepositPercent.HasValue => 
+            total * (_tour.QuoteDepositPercent.Value / 100m),
+        "none" => 0m,
+        _ => total
+    };
+}
+
+private decimal CalculateRemainingAmount()
+{
+    var total = CalculateTotalAmount();
+    var payNow = CalculatePayNowAmount();
+    return total - payNow;
+}
+
+private DateTime? CalculateRemainingDueDate()
+{
+    if (_selectedPaymentPlan != "deposit" || !_tour.QuoteDueDays.HasValue)
+    {
+        return null;
+    }
+    
+    return DateTime.UtcNow.AddDays(_tour.QuoteDueDays.Value);
+}
+```
+
+<Info>
+Tours support three payment models:
+- **Full Payment**: 100% upfront (standard)
+- **Deposit**: Percentage now, remainder later (QuoteDepositPercent + QuoteDueDays)
+- **No Payment**: Reservation without online payment (IsNoPayment = true)
+</Info>
+
+## Step 4: Payment Processing
+
+### PayPal Integration
+
+```csharp Process PayPal Payment
+private async Task ProcessPaymentAsync()
+{
+    _isProcessing = true;
+    try
+    {
+        var amount = CalculatePayNowAmount();
+        var returnUrl = $"{NavigationManager.BaseUri}payment/return";
+        var cancelUrl = $"{NavigationManager.BaseUri}payment/cancel";
+        
+        var result = await PaypalService.CreateOrderAsync(
+            amount, 
+            "DOP", 
+            returnUrl, 
+            cancelUrl);
+        
+        if (result is null || string.IsNullOrWhiteSpace(result.ApprovalUrl))
+        {
+            _errorMessage = "No pudimos iniciar el pago. Intenta de nuevo.";
+            return;
+        }
+        
+        // Create reservation in pending state
+        var reservationId = await CreatePendingReservationAsync();
+        
+        // Store reservation ID in session
+        await Storage.SetAsync("pending_reservation_id", reservationId);
+        
+        // Redirect to PayPal
+        NavigationManager.NavigateTo(result.ApprovalUrl, forceLoad: true);
+    }
+    finally
+    {
+        _isProcessing = false;
+    }
+}
+```
+
+### Reservation Creation
+
+```csharp Create Reservation
+private async Task<int> CreatePendingReservationAsync()
+{
+    var request = new TourReservationRequest(
+        TourId: _tour.TourId,
+        UserId: Session.Current?.UserId ?? 0,
+        CustomerName: _customerName,
+        CustomerEmail: _customerEmail,
+        CustomerPhone: _customerPhone,
+        SpecialRequests: _specialRequests,
+        TotalAmount: CalculateTotalAmount(),
+        CurrencyCode: "DOP",
+        PaymentStatus: 0, // Pending
+        PaymentProvider: "PayPal",
+        PaymentReference: null
+    );
+    
+    var tickets = _ticketQuantities
+        .Where(kv => kv.Value > 0)
+        .Select(kv =>
+        {
+            var ticket = GetTicket(kv.Key);
+            var unitPrice = ticket.Price ?? 0m;
+            return new TourReservationTicketRequest(
+                TourTicketTypeId: kv.Key,
+                Quantity: kv.Value,
+                UnitPrice: unitPrice,
+                Subtotal: unitPrice * kv.Value
+            );
+        });
+    
+    return await TourService.CreateReservationAsync(request, tickets);
+}
+```
+
+## Reservation Timer
+
+A 15-minute countdown prevents indefinite cart holds:
+
+```razor Reservation Timer Pill
+@if (_showTimer && _remainingSeconds.HasValue)
+{
+    var isUrgent = _remainingSeconds.Value <= 300; // Last 5 minutes
+    var widthPercent = (_remainingSeconds.Value / 900.0) * 100;
+    
+    <div class="rmodal__timer-pill @(isUrgent ? "-urgent" : "")">
+        <span class="rmodal__timer-pill__icon">⏱</span>
+        <span class="rmodal__timer-pill__text">@FormatTime(_remainingSeconds.Value)</span>
+        <div class="rmodal__timer-pill__bar-wrap">
+            <div class="rmodal__timer-pill__bar" style="width: @(widthPercent)%"></div>
+        </div>
+    </div>
+}
+```
+
+```csharp Timer Logic
+private Timer? _reservationTimer;
+private int? _remainingSeconds = 900; // 15 minutes
+
+protected override void OnAfterRender(bool firstRender)
+{
+    if (firstRender && _showTimer)
+    {
+        _reservationTimer = new Timer(async _ =>
+        {
+            if (_remainingSeconds.HasValue && _remainingSeconds.Value > 0)
+            {
+                _remainingSeconds--;
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                _reservationTimer?.Dispose();
+                await HandleTimerExpiredAsync();
+            }
+        }, null, 1000, 1000);
+    }
+}
+
+private async Task HandleTimerExpiredAsync()
+{
+    _showTimer = false;
+    _showExpiredToast = true;
+    await InvokeAsync(StateHasChanged);
+    
+    // Auto-close modal after 5 seconds
+    await Task.Delay(5000);
+    CloseReservationModal();
+}
+```
+
+<Warning>
+Always implement reservation timeouts to prevent inventory lockups. 15 minutes provides enough time for checkout while preventing abandoned carts from blocking availability.
+</Warning>
+
+## Currency Conversion
+
+Real-time currency conversion for international users:
+
+```csharp Currency Conversion
+private async Task LoadConvertedPriceAsync()
+{
+    if (_selectedCurrency == "DOP")
+    {
+        _convertedTotal = null;
+        return;
+    }
+    
+    _isConverting = true;
+    _convertError = null;
+    
+    try
+    {
+        var dopTotal = CalculateTotalAmount();
+        _convertedTotal = await CurrencyConversionService.ConvertAsync(
+            dopTotal, 
+            "DOP", 
+            _selectedCurrency);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex);
+        _convertError = "No pudimos convertir el precio.";
+    }
+    finally
+    {
+        _isConverting = false;
+        await InvokeAsync(StateHasChanged);
+    }
+}
+```
+
+## Booking Confirmation
+
+After successful payment:
+
+```razor Success Screen
+<div class="rmodal__success">
+    <div class="rmodal__success__ring">
+        <div class="rmodal__success__icon">
+            <i class="icon-check"></i>
+        </div>
+    </div>
+    
+    <h3 class="rmodal__success__title">¡Reserva confirmada!</h3>
+    <p class="rmodal__success__sub">
+        Hemos enviado los detalles de tu reserva a @_customerEmail
+    </p>
+    
+    <div class="rmodal__success__card">
+        <div class="rmodal__success__row">
+            <span>Tour:</span>
+            <span>@_tour.Title</span>
+        </div>
+        <div class="rmodal__success__row">
+            <span>Reserva #:</span>
+            <span>@_reservationId</span>
+        </div>
+        <div class="rmodal__success__row -accent">
+            <span>Total pagado:</span>
+            <span>@FormatPrice(CalculatePayNowAmount())</span>
+        </div>
+        
+        @if (_selectedPaymentPlan == "deposit")
+        {
+            <div class="rmodal__success__duedate">
+                Saldo pendiente: @FormatPrice(CalculateRemainingAmount())
+                <br />
+                Vence: @CalculateRemainingDueDate()?.ToString("dd MMM yyyy")
+            </div>
+        }
+    </div>
+    
+    <button type="button" 
+            class="rmodal__success__cta"
+            @onclick="GoToMyBookings">
+        Ver mis reservas
+    </button>
+</div>
+```
+
+## Ticket Extras
+
+Optional add-ons with per-person or flat pricing:
+
+```razor Extras Selection
+@foreach (var extra in _tour.Extras)
+{
+    <div class="extra-row">
+        <div class="extra-left">
+            <input type="checkbox" 
+                   id="extra-@extra.TourExtraId"
+                   @bind="_selectedExtras[extra.TourExtraId]" />
+            <label for="extra-@extra.TourExtraId" class="extra-name">
+                @extra.Name
+                @if (!string.IsNullOrWhiteSpace(extra.Description))
+                {
+                    <button type="button" 
+                            class="extra-tip-btn" 
+                            data-tip="@extra.Description">?</button>
+                }
+            </label>
+        </div>
+        <div class="extra-price">
+            @if (extra.ChargeMode == 1) // Flat
+            {
+                <span>@FormatPrice(extra.BasePrice) (fijo)</span>
+            }
+            else // Per person
+            {
+                <span>@FormatPrice(extra.BasePrice) por persona</span>
+            }
+        </div>
+    </div>
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Transaction Safety" icon="shield">
+    - Use database transactions for reservation creation
+    - Implement idempotency for payment webhooks
+    - Validate ticket availability before confirming
+  </Card>
+  
+  <Card title="User Experience" icon="heart">
+    - Show real-time price updates
+    - Provide clear error messages
+    - Auto-save form progress
+    - Send confirmation emails
+  </Card>
+  
+  <Card title="Inventory Management" icon="boxes-stacked">
+    - Check capacity before incrementing
+    - Implement reservation timeouts
+    - Release expired reservations
+  </Card>
+  
+  <Card title="Payment Security" icon="lock">
+    - Never store credit card details
+    - Use HTTPS for all payment flows
+    - Validate payment status server-side
+    - Log all payment attempts
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Explore Authentication" icon="key" href="/features/authentication">
+  Learn about AndanDo's JWT-based authentication system
+</Card>

@@ -1,0 +1,612 @@
+---
+title: Authentication System
+description: JWT-based authentication with secure password hashing, session management, and role-based access control
+icon: key
+---
+
+## Overview
+
+AndanDo uses a robust JWT (JSON Web Token) authentication system built on ASP.NET Core Identity principles. The system provides secure user registration, login, password management, and session persistence using PBKDF2 password hashing.
+
+<CardGroup cols={2}>
+  <Card title="JWT Tokens" icon="id-card">
+    Stateless authentication with cryptographically signed tokens
+  </Card>
+  <Card title="PBKDF2 Hashing" icon="lock">
+    100,000 iterations with SHA256 for secure password storage
+  </Card>
+  <Card title="Role Management" icon="users">
+    Flexible role-based access control (RBAC)
+  </Card>
+  <Card title="Session Persistence" icon="floppy-disk">
+    Browser storage with protected data
+  </Card>
+</CardGroup>
+
+## Authentication Architecture
+
+### Service Interface
+
+```csharp IAuthService.cs
+public interface IAuthService
+{
+    Task<AuthResult> SignInAsync(LoginRequest request, CancellationToken cancellationToken = default);
+    Task<RegisterResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    string HashPassword(string password);
+    bool VerifyPassword(string password, string passwordHash);
+    Task<UserProfileDto?> GetUserProfileAsync(int userId, CancellationToken cancellationToken = default);
+    Task UpdateUserProfileAsync(UpdateUserProfileRequest request, CancellationToken cancellationToken = default);
+    Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken = default);
+    Task<bool> IsUserInRoleAsync(int userId, int roleId, CancellationToken cancellationToken = default);
+}
+```
+
+## User Registration
+
+### Registration Flow
+
+<Steps>
+  <Step title="Collect User Data">
+    Capture email, password, name, and optional profile information
+  </Step>
+  <Step title="Hash Password">
+    Use PBKDF2 with 100,000 iterations and SHA256
+  </Step>
+  <Step title="Store User Record">
+    Insert into Usuarios table via stored procedure
+  </Step>
+  <Step title="Assign Default Role">
+    Automatically assign "User" role (RolId = 1)
+  </Step>
+  <Step title="Return Result">
+    Provide success confirmation with user ID
+  </Step>
+</Steps>
+
+### Registration Implementation
+
+```csharp AuthService.cs - RegisterAsync
+public async Task<RegisterResult> RegisterAsync(
+    RegisterRequest request, 
+    CancellationToken cancellationToken = default)
+{
+    await using var connection = new SqlConnection(_connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    var passwordHash = HashPassword(request.Password);
+
+    await using var command = new SqlCommand("sp_Usuarios_Registrar", connection)
+    {
+        CommandType = CommandType.StoredProcedure
+    };
+
+    command.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 150) 
+        { Value = request.Email });
+    command.Parameters.Add(new SqlParameter("@ContrasenaHash", SqlDbType.NVarChar, 300) 
+        { Value = passwordHash });
+    command.Parameters.Add(new SqlParameter("@Nombre", SqlDbType.NVarChar, 100) 
+        { Value = request.Nombre });
+    command.Parameters.Add(new SqlParameter("@Apellido", SqlDbType.NVarChar, 100)
+    {
+        Value = (object?)request.Apellido ?? DBNull.Value
+    });
+    command.Parameters.Add(new SqlParameter("@Telefono", SqlDbType.NVarChar, 30)
+    {
+        Value = (object?)request.Telefono ?? DBNull.Value
+    });
+    command.Parameters.Add(new SqlParameter("@Pais", SqlDbType.NVarChar, 80)
+    {
+        Value = (object?)request.Pais ?? DBNull.Value
+    });
+    command.Parameters.Add(new SqlParameter("@Ciudad", SqlDbType.NVarChar, 80)
+    {
+        Value = (object?)request.Ciudad ?? DBNull.Value
+    });
+
+    var userIdParameter = new SqlParameter("@UsuarioId", SqlDbType.Int)
+    {
+        Direction = ParameterDirection.Output
+    };
+    var resultadoParameter = new SqlParameter("@Resultado", SqlDbType.Int)
+    {
+        Direction = ParameterDirection.Output
+    };
+    var mensajeParameter = new SqlParameter("@Mensaje", SqlDbType.NVarChar, 200)
+    {
+        Direction = ParameterDirection.Output,
+        Size = 200
+    };
+
+    command.Parameters.Add(userIdParameter);
+    command.Parameters.Add(resultadoParameter);
+    command.Parameters.Add(mensajeParameter);
+
+    await command.ExecuteNonQueryAsync(cancellationToken);
+
+    var resultCode = resultadoParameter.Value == DBNull.Value 
+        ? -1 
+        : Convert.ToInt32(resultadoParameter.Value);
+    var message = Convert.ToString(mensajeParameter.Value ?? string.Empty) ?? string.Empty;
+    var userId = userIdParameter.Value == DBNull.Value 
+        ? 0 
+        : Convert.ToInt32(userIdParameter.Value);
+
+    // Handle error codes
+    if (resultCode == 1)
+    {
+        throw new InvalidOperationException("El email ya esta registrado.");
+    }
+
+    if (resultCode != 0 || userId <= 0)
+    {
+        throw new InvalidOperationException("No se pudo registrar el usuario.");
+    }
+
+    // Ensure default role assignment
+    await EnsureRoleAssignmentAsync(connection, userId, 1, cancellationToken);
+
+    return new RegisterResult(userId, request.Email, message);
+}
+```
+
+### Registration DTOs
+
+```csharp AuthDtos.cs
+public record RegisterRequest(
+    string Email,
+    string Password,
+    string Nombre,
+    string? Apellido,
+    string? Telefono,
+    string? Pais,
+    string? Ciudad,
+    string? FotoPerfilUrl = null
+);
+
+public record RegisterResult(
+    int UserId, 
+    string Email, 
+    string Message
+);
+```
+
+## Password Security
+
+### PBKDF2 Hashing
+
+AndanDo uses PBKDF2 (Password-Based Key Derivation Function 2) with strong parameters:
+
+```csharp Password Hashing
+private const int Pbkdf2Iterations = 100_000;
+private const int Pbkdf2SaltSize = 16;
+private const int Pbkdf2KeySize = 32;
+
+public string HashPassword(string password)
+{
+    var salt = RandomNumberGenerator.GetBytes(Pbkdf2SaltSize);
+    var hash = Rfc2898DeriveBytes.Pbkdf2(
+        password,
+        salt,
+        Pbkdf2Iterations,
+        HashAlgorithmName.SHA256,
+        Pbkdf2KeySize);
+
+    return $"{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
+}
+```
+
+<Note>
+**Why PBKDF2?**
+- Industry standard for password hashing
+- Configurable iteration count (100,000 iterations)
+- Resistant to rainbow table attacks via unique salts
+- Computationally expensive for attackers
+</Note>
+
+### Password Verification
+
+```csharp Password Verification
+public bool VerifyPassword(string password, string passwordHash)
+{
+    var parts = passwordHash.Split(':');
+    if (parts.Length != 2) return false;
+
+    var salt = Convert.FromBase64String(parts[0]);
+    var storedHash = Convert.FromBase64String(parts[1]);
+
+    var computed = Rfc2898DeriveBytes.Pbkdf2(
+        password,
+        salt,
+        Pbkdf2Iterations,
+        HashAlgorithmName.SHA256,
+        Pbkdf2KeySize);
+
+    return CryptographicOperations.FixedTimeEquals(storedHash, computed);
+}
+```
+
+<Warning>
+`CryptographicOperations.FixedTimeEquals` prevents timing attacks by ensuring comparison takes constant time regardless of match position.
+</Warning>
+
+## User Login
+
+### Login Flow
+
+```csharp AuthService.cs - SignInAsync
+public async Task<AuthResult> SignInAsync(
+    LoginRequest request, 
+    CancellationToken cancellationToken = default)
+{
+    await using var connection = new SqlConnection(_connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        SELECT TOP 1 UsuarioId, Email, ContrasenaHash, EstaActivo, EstaBloqueado, 
+                     Nombre, Apellido, Telefono, FotoPerfilUrl
+        FROM Usuarios
+        WHERE Email = @Email
+    """;
+
+    await using var command = new SqlCommand(sql, connection);
+    command.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 150)
+    {
+        Value = request.Email
+    });
+
+    await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+    if (!await reader.ReadAsync(cancellationToken))
+    {
+        throw new UnauthorizedAccessException("Credenciales incorrectas.");
+    }
+
+    var userId = reader.GetInt32(0);
+    var email = reader.GetString(1);
+    var passwordHash = reader.GetString(2);
+    var estaActivo = reader.GetBoolean(3);
+    var estaBloqueado = reader.GetBoolean(4);
+    var nombre = reader.GetString(5);
+    var apellido = reader.GetString(6);
+    var telefono = reader.IsDBNull(7) ? null : reader.GetString(7);
+    var foto = reader.IsDBNull(8) ? null : reader.GetString(8);
+
+    // Validate account status
+    if (!estaActivo)
+    {
+        throw new UnauthorizedAccessException("Usuario inactivo.");
+    }
+
+    if (estaBloqueado)
+    {
+        throw new UnauthorizedAccessException("Usuario bloqueado.");
+    }
+
+    // Verify password
+    if (!VerifyPassword(request.Password, passwordHash))
+    {
+        throw new UnauthorizedAccessException("Credenciales incorrectas.");
+    }
+
+    await reader.CloseAsync();
+
+    // Update last login timestamp
+    await UpdateUltimoLoginAsync(connection, userId, cancellationToken);
+
+    // Generate JWT token
+    var token = _jwtTokenService.GenerateToken(new UserIdentity(userId, email));
+    
+    return new AuthResult(userId, email, token, nombre, apellido, telefono, foto);
+}
+```
+
+### Login DTOs
+
+```csharp
+public record LoginRequest(string Email, string Password);
+
+public record AuthResult(
+    int UserId,
+    string Email,
+    string Token,
+    string Nombre,
+    string? Apellido,
+    string? Telefono,
+    string? FotoPerfilUrl
+);
+```
+
+## JWT Token Generation
+
+### Token Service
+
+```csharp JwtTokenService.cs
+public sealed class JwtTokenService : IJwtTokenService
+{
+    private readonly JwtOptions _options;
+    private readonly TimeProvider _timeProvider;
+    private readonly JwtSecurityTokenHandler _tokenHandler = new();
+
+    public string GenerateToken(UserIdentity identity)
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SecretKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256Signature);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, identity.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, identity.Email),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        var now = _timeProvider.GetUtcNow();
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),
+            NotBefore = now.UtcDateTime,
+            IssuedAt = now.UtcDateTime,
+            Expires = now.AddMinutes(_options.ExpirationMinutes).UtcDateTime,
+            Issuer = _options.Issuer,
+            Audience = _options.Audience,
+            SigningCredentials = credentials
+        };
+
+        var token = _tokenHandler.CreateToken(descriptor);
+        return _tokenHandler.WriteToken(token);
+    }
+}
+```
+
+### JWT Configuration
+
+```json appsettings.json
+{
+  "Jwt": {
+    "Issuer": "AndanDo",
+    "Audience": "AndanDo.Users",
+    "SecretKey": "your-secret-key-min-32-characters",
+    "ExpirationMinutes": 60
+  }
+}
+```
+
+```csharp Program.cs Configuration
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+```
+
+<Info>
+**JWT Token Structure:**
+- **Subject (sub)**: User ID
+- **Email**: User email address
+- **JTI**: Unique token identifier
+- **Expiration**: Configurable lifetime (default 60 minutes)
+</Info>
+
+## Session Management
+
+### UserSession Service
+
+Blazor Server uses a scoped `UserSession` service to maintain authentication state:
+
+```csharp UserSession.cs
+public sealed class UserSession
+{
+    public AuthResult? Current { get; private set; }
+    public bool IsAuthenticated => Current is not null;
+
+    public void SetUser(AuthResult authResult)
+    {
+        Current = authResult;
+    }
+
+    public void Clear()
+    {
+        Current = null;
+    }
+}
+```
+
+### Session Persistence
+
+Sessions are persisted to browser storage:
+
+```csharp Session Persistence
+@inject ProtectedLocalStorage Storage
+@inject UserSession Session
+
+private async Task EnsureSessionLoadedAsync()
+{
+    if (Session.IsAuthenticated)
+        return;
+
+    try
+    {
+        var stored = await Storage.GetAsync<AuthResult>("auth_session");
+        if (stored.Success && stored.Value is not null)
+        {
+            Session.SetUser(stored.Value);
+        }
+    }
+    catch
+    {
+        // Ignore storage errors
+    }
+}
+```
+
+<Note>
+`ProtectedLocalStorage` encrypts data before storing in browser localStorage, preventing tampering.
+</Note>
+
+## Role-Based Access Control
+
+### Role Checking
+
+```csharp Check User Role
+public async Task<bool> IsUserInRoleAsync(
+    int userId,
+    int roleId,
+    CancellationToken cancellationToken = default)
+{
+    if (userId <= 0)
+    {
+        return false;
+    }
+
+    await using var connection = new SqlConnection(_connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    const string sql = """
+        SELECT 1
+        FROM UsuarioRoles
+        WHERE UsuarioId = @UsuarioId AND RolId = @RolId
+    """;
+
+    await using var command = new SqlCommand(sql, connection);
+    command.Parameters.Add(new SqlParameter("@UsuarioId", SqlDbType.Int) { Value = userId });
+    command.Parameters.Add(new SqlParameter("@RolId", SqlDbType.Int) { Value = roleId });
+
+    var result = await command.ExecuteScalarAsync(cancellationToken);
+    return result is not null;
+}
+```
+
+### Admin Validation Component
+
+```razor ValidateAdmin.razor
+@inject UserSession Session
+@inject IAuthService AuthService
+
+@if (_isAdmin)
+{
+    @ChildContent
+}
+else
+{
+    <div class="alert alert-warning">
+        No tienes permisos para acceder a esta página.
+    </div>
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Session.IsAuthenticated && Session.Current is not null)
+        {
+            _isAdmin = await AuthService.IsUserInRoleAsync(Session.Current.UserId, 2); // RolId 2 = Admin
+        }
+    }
+}
+```
+
+## Password Management
+
+### Change Password
+
+```csharp Change Password Flow
+public async Task ChangePasswordAsync(
+    ChangePasswordRequest request,
+    CancellationToken cancellationToken = default)
+{
+    await using var connection = new SqlConnection(_connectionString);
+    await connection.OpenAsync(cancellationToken);
+
+    // 1. Fetch current password hash
+    const string getSql = """
+        SELECT TOP 1 ContrasenaHash, EstaActivo, EstaBloqueado
+        FROM Usuarios
+        WHERE UsuarioId = @UsuarioId
+    """;
+
+    await using var getCommand = new SqlCommand(getSql, connection);
+    getCommand.Parameters.Add(new SqlParameter("@UsuarioId", SqlDbType.Int) 
+        { Value = request.UsuarioId });
+
+    await using var reader = await getCommand.ExecuteReaderAsync(cancellationToken);
+    if (!await reader.ReadAsync(cancellationToken))
+    {
+        throw new InvalidOperationException("Usuario no encontrado.");
+    }
+
+    var currentHash = reader.GetString(reader.GetOrdinal("ContrasenaHash"));
+    var activo = reader.GetBoolean(reader.GetOrdinal("EstaActivo"));
+    var bloqueado = reader.GetBoolean(reader.GetOrdinal("EstaBloqueado"));
+
+    if (!activo || bloqueado)
+    {
+        throw new InvalidOperationException("La cuenta no está disponible.");
+    }
+
+    // 2. Verify current password
+    if (!VerifyPassword(request.PasswordActual, currentHash))
+    {
+        throw new InvalidOperationException("La contraseña actual es incorrecta.");
+    }
+
+    await reader.CloseAsync();
+
+    // 3. Hash new password
+    var newHash = HashPassword(request.PasswordNueva);
+
+    // 4. Update database
+    const string updateSql = """
+        UPDATE Usuarios
+        SET ContrasenaHash = @ContrasenaHash,
+            FechaActualizacion = SYSUTCDATETIME()
+        WHERE UsuarioId = @UsuarioId
+    """;
+
+    await using var updateCommand = new SqlCommand(updateSql, connection);
+    updateCommand.Parameters.Add(new SqlParameter("@UsuarioId", SqlDbType.Int) 
+        { Value = request.UsuarioId });
+    updateCommand.Parameters.Add(new SqlParameter("@ContrasenaHash", SqlDbType.NVarChar, 300) 
+        { Value = newHash });
+
+    var rows = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+    if (rows == 0)
+    {
+        throw new InvalidOperationException("No se pudo actualizar la contraseña.");
+    }
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Password Security" icon="shield-halved">
+    - Never store passwords in plain text
+    - Use strong hashing (PBKDF2, bcrypt, or Argon2)
+    - Enforce minimum password strength
+    - Implement account lockout after failed attempts
+  </Card>
+  
+  <Card title="Token Management" icon="key">
+    - Use short expiration times (60 minutes)
+    - Implement token refresh mechanism
+    - Store tokens securely (protected storage)
+    - Validate tokens on every request
+  </Card>
+  
+  <Card title="Session Handling" icon="clock-rotate-left">
+    - Clear sessions on logout
+    - Handle expired sessions gracefully
+    - Persist sessions across page reloads
+    - Invalidate sessions on password change
+  </Card>
+  
+  <Card title="Access Control" icon="user-shield">
+    - Check permissions server-side
+    - Use role-based authorization
+    - Implement least privilege principle
+    - Log authentication events
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Explore Payment Integration" icon="credit-card" href="/features/payment-integration">
+  Learn how AndanDo integrates PayPal for secure payment processing
+</Card>

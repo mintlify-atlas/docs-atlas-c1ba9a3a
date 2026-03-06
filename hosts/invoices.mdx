@@ -1,0 +1,364 @@
+---
+title: 'Invoice Generation'
+description: 'Generate and manage customer invoices for tour reservations'
+icon: 'file-invoice'
+---
+
+## Overview
+
+AndanDo provides automated invoice generation for all tour reservations. Invoices can be viewed, printed, and shared with customers directly from the dashboard.
+
+<Info>
+Invoices are accessible at `/invoice` and stored temporarily in browser local storage.
+</Info>
+
+## Invoice Page Component
+
+The invoice viewer is a simple component that displays pre-generated HTML:
+
+```razor Components/Pages/Invoice.razor:1
+@page "/invoice"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject ProtectedLocalStorage Storage
+@inject IJSRuntime JS
+@layout EmptyLayout
+
+<div>
+    @if (string.IsNullOrWhiteSpace(_html))
+    {
+        <div class="alert alert-warning">
+            No hay factura para mostrar. Completa una reserva e intenta nuevamente.
+        </div>
+    }
+    else
+    {
+        <div @onclick:stopPropagation="true">
+            @((MarkupString)_html)
+        </div>
+    }
+</div>
+
+@code {
+    private string? _html;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var stored = await Storage.GetAsync<string>("last_invoice_html");
+        if (stored.Success && !string.IsNullOrWhiteSpace(stored.Value))
+        {
+            _html = stored.Value;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}
+```
+
+## Accessing Invoices
+
+Invoices can be accessed from the dashboard reservation table:
+
+<Steps>
+  <Step title="Navigate to Dashboard">
+    Go to `/dashboard/main` and select a tour from the dropdown
+  </Step>
+  
+  <Step title="Locate Reservation">
+    Find the reservation in the table
+  </Step>
+  
+  <Step title="Open Actions Menu">
+    Click the "Acciones" button for the reservation
+  </Step>
+  
+  <Step title="View Invoice">
+    Select "Ver factura" to generate and display the invoice
+  </Step>
+</Steps>
+
+## Invoice Generation
+
+Invoices are generated from reservation data in the dashboard:
+
+```csharp Components/Pages/Dashboard/Index.razor:206
+private async Task OpenInvoiceAsync(TourReservationReportDto r)
+{
+    try
+    {
+        var invoiceHtml = await GenerateInvoiceHtmlAsync(r);
+        await Storage.SetAsync("last_invoice_html", invoiceHtml);
+        Navigation.NavigateTo("/invoice", true);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error generating invoice: {ex.Message}");
+        ShowModal("Error", "No se pudo generar la factura.");
+    }
+}
+```
+
+## Invoice Data Structure
+
+Invoices are generated using the `TourReservationReportDto`:
+
+```csharp Dtos/TourDtos.cs:97
+public sealed record TourReservationReportDto(
+    int ReservationId,
+    string ReservationCode,
+    DateTime TravelDate,
+    DateTime? CreatedAt,
+    int TotalTickets,
+    decimal TotalAmount,
+    string CurrencyCode,
+    byte ReservationStatus,
+    byte PaymentStatus,
+    decimal? AmountPaid,
+    decimal? AmountPending,
+    DateTime? NextChargeDate,
+    byte? PaymentPlanType,
+    string? ContactName,
+    string? ContactEmail,
+    string? ContactPhone,
+    IReadOnlyList<TourReservationTicketLineDto> Tickets);
+```
+
+### Ticket Line Items
+
+Each invoice includes detailed ticket information:
+
+```csharp Dtos/TourDtos.cs:130
+public sealed record TourReservationTicketLineDto(
+    int ReservationId,
+    int TicketTypeId,
+    string TicketName,
+    int Quantity,
+    decimal UnitPrice,
+    string? TicketReservationCode = null,
+    string? PassengerDocument = null,
+    string? PassengerName = null);
+```
+
+## Invoice Contents
+
+A typical invoice includes:
+
+<CardGroup cols={2}>
+  <Card title="Header Information" icon="heading">
+    - Company logo and details
+    - Invoice number (Reservation Code)
+    - Issue date
+    - Tour title and location
+  </Card>
+  
+  <Card title="Customer Details" icon="user">
+    - Contact name
+    - Email address
+    - Phone number
+    - Travel date
+  </Card>
+  
+  <Card title="Line Items" icon="list">
+    - Ticket type names
+    - Quantities
+    - Unit prices
+    - Line totals
+  </Card>
+  
+  <Card title="Payment Summary" icon="calculator">
+    - Subtotal
+    - Service charges
+    - Total amount
+    - Payment status
+  </Card>
+</CardGroup>
+
+## Service Charge Display
+
+The invoice breaks down service charges separately:
+
+```razor
+var detailBaseTotal = r.Tickets.Sum(x => x.Quantity * x.UnitPrice);
+var detailServiceCharge = r.TotalAmount - detailBaseTotal;
+var hasServiceCharge = detailServiceCharge > 0.01m;
+
+@if (hasServiceCharge)
+{
+    <tr style="background:#fff8f5;">
+        <td colspan="5" style="text-align:right;">
+            <span>Cargo por servicio</span>
+        </td>
+        <td style="text-align:right;">
+            + @FormatCurrency(detailServiceCharge, r.CurrencyCode)
+        </td>
+    </tr>
+}
+```
+
+<Note>
+Service charges cover platform operational costs including payment processing and system maintenance.
+</Note>
+
+## Partial Payment Display
+
+For reservations with partial payments, the invoice shows:
+
+```razor
+@if (r.AmountPaid > 0 && r.AmountPaid < r.TotalAmount)
+{
+    <tr>
+        <td colspan="5" style="text-align:right;">Pagado</td>
+        <td style="text-align:right;">
+            @FormatCurrency(r.AmountPaid ?? 0, r.CurrencyCode)
+        </td>
+    </tr>
+    <tr>
+        <td colspan="5" style="text-align:right;">Pendiente</td>
+        <td style="text-align:right;">
+            @FormatCurrency(r.AmountPending ?? 0, r.CurrencyCode)
+        </td>
+    </tr>
+    @if (r.NextChargeDate.HasValue)
+    {
+        <tr>
+            <td colspan="5" style="text-align:right;">Próximo cobro</td>
+            <td style="text-align:right;">
+                @FormatDate(r.NextChargeDate.Value)
+            </td>
+        </tr>
+    }
+}
+```
+
+## Currency Formatting
+
+Invoices support multiple currencies with proper formatting:
+
+```csharp
+private static string FormatCurrency(decimal amount, string currencyCode)
+{
+    var symbol = currencyCode switch
+    {
+        "USD" => "$",
+        "EUR" => "EUR",
+        _ => "RD$"
+    };
+
+    return $"{symbol}{amount:N0}";
+}
+```
+
+### Supported Currencies
+
+| Code | Symbol | Format |
+|------|--------|--------|
+| USD | $ | $1,000 |
+| EUR | EUR | EUR1,000 |
+| DOP | RD$ | RD$1,000 |
+
+## Print Functionality
+
+Invoices can be printed using the browser's print dialog:
+
+```csharp Components/Pages/Invoice.razor:38
+private void Print()
+{
+    JS.InvokeVoidAsync("window.print");
+}
+```
+
+<Tip>
+Use the browser's "Save as PDF" option in the print dialog to create a PDF invoice.
+</Tip>
+
+## Payment Status Indicators
+
+Invoices display payment status with colored badges:
+
+```csharp
+private string GetPaymentLabel(byte paymentStatus) => paymentStatus switch
+{
+    0 => "Pendiente",
+    1 => "Pagado",
+    2 => "Pago Parcial",
+    3 => "Reembolsado",
+    4 => "Cancelado",
+    _ => "Desconocido"
+};
+
+private string GetPaymentBadge(TourReservationReportDto r)
+{
+    return r.PaymentStatus switch
+    {
+        0 => "payment-badge--pending",
+        1 => "payment-badge--paid",
+        2 => "payment-badge--partial",
+        3 => "payment-badge--refunded",
+        4 => "payment-badge--cancelled",
+        _ => "payment-badge--unknown"
+    };
+}
+```
+
+## Empty Layout
+
+Invoices use an empty layout for clean printing:
+
+```razor
+@layout EmptyLayout
+```
+
+This removes navigation, headers, and footers, displaying only the invoice content.
+
+## Storage and Security
+
+<Warning>
+Invoices are stored in browser local storage temporarily. They are not persisted to the database.
+</Warning>
+
+### Protected Browser Storage
+
+AndanDo uses `ProtectedLocalStorage` for secure client-side storage:
+
+```csharp
+@inject ProtectedLocalStorage Storage
+
+// Store invoice
+await Storage.SetAsync("last_invoice_html", invoiceHtml);
+
+// Retrieve invoice
+var stored = await Storage.GetAsync<string>("last_invoice_html");
+```
+
+## Customization
+
+To customize invoice appearance, modify the inline styles in the invoice generation method:
+
+```csharp
+private async Task<string> GenerateInvoiceHtmlAsync(TourReservationReportDto r)
+{
+    var sb = new StringBuilder();
+    
+    sb.Append("<div style='max-width:800px;margin:0 auto;padding:40px;'>");
+    sb.Append($"<h1 style='color:#eb662b;'>FACTURA</h1>");
+    sb.Append($"<p>Código: {r.ReservationCode}</p>");
+    // ... build HTML
+    sb.Append("</div>");
+    
+    return sb.ToString();
+}
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Dashboard Overview" icon="gauge" href="/hosts/dashboard">
+    Access the main dashboard to view reservations
+  </Card>
+  <Card title="Managing Bookings" icon="calendar-check" href="/hosts/managing-bookings">
+    Learn about reservation management
+  </Card>
+  <Card title="Payment Methods" icon="credit-card" href="/features/payment-integration">
+    Configure payment processing
+  </Card>
+</CardGroup>
