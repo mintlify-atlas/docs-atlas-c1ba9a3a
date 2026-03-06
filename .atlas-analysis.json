@@ -1,0 +1,143 @@
+{
+  "projectType": "saas",
+  "projectName": "AndanDo",
+  "projectDescription": "Tour marketplace platform where travelers discover and book experiences, and hosts manage tours, bookings, and revenue.",
+  "theme": "almond",
+  "primaryColor": "#FF6B35",
+  "lightColor": "#FFB84D",
+  "darkColor": "#D94A1A",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/marketplace",
+              "features/search-and-filters",
+              "features/booking-system",
+              "features/authentication",
+              "features/payment-integration"
+            ]
+          },
+          {
+            "group": "User Guides",
+            "pages": [
+              "guides/browsing-tours",
+              "guides/making-reservations",
+              "guides/reviews-and-likes"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "For Hosts",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "hosts/overview",
+              "hosts/creating-account"
+            ]
+          },
+          {
+            "group": "Tour Management",
+            "pages": [
+              "hosts/creating-tours",
+              "hosts/tour-details",
+              "hosts/ticket-types",
+              "hosts/extras-and-addons",
+              "hosts/pricing"
+            ]
+          },
+          {
+            "group": "Bookings & Revenue",
+            "pages": [
+              "hosts/dashboard",
+              "hosts/managing-bookings",
+              "hosts/invoices",
+              "hosts/statistics"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "development/architecture",
+              "development/tech-stack",
+              "development/project-structure"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "api/tour-service",
+              "api/auth-service",
+              "api/payment-service",
+              "api/utility-services"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/appsettings",
+              "configuration/database",
+              "configuration/jwt",
+              "configuration/email",
+              "configuration/paypal"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/requirements",
+              "deployment/setup",
+              "deployment/production"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Tour marketplace with search and geolocation",
+    "Multi-step booking system with tickets and extras",
+    "Host dashboard with statistics and revenue tracking",
+    "JWT authentication and user management",
+    "PayPal payment integration",
+    "Reviews, likes, and ratings system",
+    "Email notifications for bookings",
+    "Invoice generation and management",
+    "Tour availability and capacity management",
+    "Image upload and management"
+  ],
+  "publicApiSurface": [
+    "ITourService.CreateTourAsync",
+    "ITourService.GetToursForMarketplaceAsync",
+    "ITourService.UpsertTicketTypesAsync",
+    "ITourService.UpsertExtrasAsync",
+    "ITourService.UpdateReservationPaymentStatusAsync",
+    "IAuthService.RegisterUserAsync",
+    "IAuthService.LoginAsync",
+    "IAuthService.ValidateTokenAsync",
+    "IPaypalService.CreateOrderAsync",
+    "IPaypalService.CaptureOrderAsync",
+    "IEmailService.SendEmailAsync",
+    "IPostLikeService.ToggleLikeAsync",
+    "IReviewService.CreateReviewAsync",
+    "ICurrencyConversionService.ConvertAsync"
+  ]
+}
